@@ -786,27 +786,70 @@ def api_delete_take(take_id: str):
 def _parse_script_text_to_lines(script_text: str) -> List[SceneLineItem]:
     """
     Parse human or LLM plain-text script lines into structured `SceneLineItem` objects.
-    Supports low-friction formats like:
+    Supports both multi-character scripts AND game NPC monologue/phone-call skits:
       - `Torvin (gruff 60s Scottish dwarf blacksmith): Keep your coin, traveler.`
       - `Nyx [maya1, 1.25x]: Oh, brilliant plan! <laugh> Let's walk right in.`
-      - `Guard (nervous young watchman) [fast, overlap 180ms]: Wait—don't touch that!`
-      - `[Pause: 600ms]` or `[Overlap: 200ms]` (attaches pause/overlap to previous line)
+      - `[Pause: 600ms]`, `[pause 1.5s]`, or `[Overlap: 200ms]`
+      - Game NPC Skit format:
+          STORY: side_hustle_milk_1
+          NPC TYPE: Normal (female, 20s)
+          [casual]    "Don't worry I found a new side hustle"
+          [pause 1.5s]
+          [defensive] "No this isn't like last time"
     """
     parsed: List[SceneLineItem] = []
     line_pattern = re.compile(r"^\s*([^\(:\[]+?)(?:\s*\(([^\)]+)\))?(?:\s*\[([^\]]+)\])?\s*:\s*(.+)$")
-    pause_pattern = re.compile(r"^\s*\[?\s*(pause|overlap)\s*[:=]?\s*(-?\d+)\s*(?:ms)?\s*\]?\s*$", re.IGNORECASE)
+    pause_pattern = re.compile(
+        r"^\s*\[?\s*(pause|overlap)\s*[:=]?\s*(-?\d+(?:\.\d+)?)\s*(ms|s|sec|seconds?)?\s*\]?\s*$",
+        re.IGNORECASE,
+    )
+    bracket_quote_pattern = re.compile(r"^\s*\[([^\]]+)\]\s*\"?(.+?)\"?\s*$")
+
+    default_speaker = "NPC"
+    default_npc_desc = None
 
     for raw_line in script_text.splitlines():
         s = raw_line.strip()
-        if not s or s.startswith("#") or s.startswith("//"):
+        if not s or s.startswith("#") or s.startswith("//") or set(s).issubset({"─", "-", "=", "_", " "}):
+            continue
+
+        # Header metadata lines for Game NPC Skit format
+        upper = s.upper()
+        if upper.startswith("STORY:"):
+            story_id = s.split(":", 1)[1].strip()
+            if story_id:
+                default_speaker = story_id
+            continue
+        if upper.startswith("NPC TYPE:"):
+            default_npc_desc = s.split(":", 1)[1].strip()
+            continue
+        if upper.startswith("TRIGGER:"):
             continue
 
         pm = pause_pattern.match(s)
         if pm:
             if parsed:
                 kind = pm.group(1).lower()
-                val = abs(int(pm.group(2)))
-                parsed[-1].pause_after_ms = -val if kind == "overlap" else val
+                raw_num = abs(float(pm.group(2)))
+                unit = (pm.group(3) or "ms").lower()
+                val_ms = int(round(raw_num * 1000)) if unit.startswith("s") else int(round(raw_num))
+                parsed[-1].pause_after_ms = -val_ms if kind == "overlap" else val_ms
+            continue
+
+        # Format B: `[casual] "Don't worry I found a new side hustle"`
+        bqm = bracket_quote_pattern.match(s)
+        if bqm and ":" not in s.split("]", 1)[0]:
+            emotion_tag = bqm.group(1).strip()
+            dialogue = bqm.group(2).strip().strip('"').strip("“").strip("”")
+            if dialogue:
+                combined_instruct = f"{default_npc_desc}, {emotion_tag} tone" if default_npc_desc else f"{emotion_tag} tone"
+                parsed.append(
+                    SceneLineItem(
+                        speaker=default_speaker,
+                        text=dialogue,
+                        instruct=combined_instruct,
+                    )
+                )
             continue
 
         m = line_pattern.match(s)
@@ -814,7 +857,7 @@ def _parse_script_text_to_lines(script_text: str) -> List[SceneLineItem]:
             speaker = m.group(1).strip()
             instruct = (m.group(2) or "").strip() or None
             directives = (m.group(3) or "").strip().lower()
-            dialogue = m.group(4).strip()
+            dialogue = m.group(4).strip().strip('"')
 
             model_id = None
             speed = None
@@ -836,12 +879,16 @@ def _parse_script_text_to_lines(script_text: str) -> List[SceneLineItem]:
                 elif "slow" in directives:
                     speed = 0.92
 
-                ov_m = re.search(r"overlap\s*[:=]?\s*(\d+)", directives)
+                ov_m = re.search(r"overlap\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(ms|s)?", directives)
                 if ov_m:
-                    pause_after_ms = -abs(int(ov_m.group(1)))
-                ps_m = re.search(r"pause\s*[:=]?\s*(-?\d+)", directives)
+                    num = float(ov_m.group(1))
+                    u = (ov_m.group(2) or "ms").lower()
+                    pause_after_ms = -abs(int(num * 1000) if u == "s" else int(num))
+                ps_m = re.search(r"pause\s*[:=]?\s*(-?\d+(?:\.\d+)?)\s*(ms|s)?", directives)
                 if ps_m:
-                    pause_after_ms = int(ps_m.group(1))
+                    num = float(ps_m.group(1))
+                    u = (ps_m.group(2) or "ms").lower()
+                    pause_after_ms = int(num * 1000) if u == "s" else int(num)
 
             if dialogue:
                 parsed.append(
