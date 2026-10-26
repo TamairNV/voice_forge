@@ -67,25 +67,35 @@ class VoiceForgeClient:
         text: str,
         instruct: str,
         model_id: str = "qwen3_voicedesign",
-        speed: float = 1.15,
-        trim_silence: bool = True,
+        speed: float = 1.0,
+        trim_silence: bool = False,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        repetition_penalty: Optional[float] = None,
+        seed: Optional[int] = None,
         output_wav: Optional[Union[str, Path]] = None,
     ) -> Dict[str, Any]:
         """
         Generate speech from a character/voice description using 'qwen3_voicedesign' or 'maya1'.
+        Defaults to pure, unprocessed neural output (`speed=1.0, trim_silence=False`).
         Optionally saves the WAV file to `output_wav`.
         """
-        res = self._request_json(
-            "POST",
-            "/api/synthesize",
-            {
-                "model_id": model_id,
-                "text": text,
-                "instruct": instruct,
-                "speed": speed,
-                "trim_silence": trim_silence,
-            },
-        )
+        payload: Dict[str, Any] = {
+            "model_id": model_id,
+            "text": text,
+            "instruct": instruct,
+            "speed": speed,
+            "trim_silence": trim_silence,
+        }
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if top_p is not None:
+            payload["top_p"] = top_p
+        if repetition_penalty is not None:
+            payload["repetition_penalty"] = repetition_penalty
+        if seed is not None:
+            payload["seed"] = seed
+        res = self._request_json("POST", "/api/synthesize", payload)
         if output_wav:
             self.download_take(res["take"]["url"], output_wav)
         return res["take"]
@@ -96,48 +106,67 @@ class VoiceForgeClient:
         instruct: str,
         sample_text: str = "Keep your eyes sharp. Nothing in this sector is what it seems, and we only get one shot at this.",
         design_model_id: str = "qwen3_voicedesign",
-        speed: float = 1.15,
+        speed: float = 1.0,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        seed: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         One-shot LLM helper:
-        1. Invents a brand new voice from `instruct`
+        1. Invents a brand new voice from `instruct` (saved at pure 1.0x unprocessed quality)
         2. Locks it as a persistent NPC character under `name`
         3. Returns the locked character dict (with `id` for `speak_as_character`)
         """
+        payload: Dict[str, Any] = {
+            "name": name,
+            "instruct": instruct,
+            "sample_text": sample_text,
+            "design_model_id": design_model_id,
+            "speed": speed,
+        }
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if top_p is not None:
+            payload["top_p"] = top_p
+        if seed is not None:
+            payload["seed"] = seed
         return self._request_json(
             "POST",
             "/api/characters/design-and-lock",
-            {
-                "name": name,
-                "instruct": instruct,
-                "sample_text": sample_text,
-                "design_model_id": design_model_id,
-                "speed": speed,
-            },
+            payload,
         )["character"]
 
     def speak_as_character(
         self,
         character_id_or_name: str,
         text: str,
-        speed: float = 1.15,
-        trim_silence: bool = True,
+        speed: float = 1.0,
+        trim_silence: bool = False,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        repetition_penalty: Optional[float] = None,
+        seed: Optional[int] = None,
         output_wav: Optional[Union[str, Path]] = None,
     ) -> Dict[str, Any]:
         """
         Speak a new dialogue line using a locked NPC character voice (`qwen3_clone`) with zero vocal drift.
         """
-        res = self._request_json(
-            "POST",
-            "/api/synthesize",
-            {
-                "model_id": "qwen3_clone",
-                "character_id": character_id_or_name,
-                "text": text,
-                "speed": speed,
-                "trim_silence": trim_silence,
-            },
-        )
+        payload: Dict[str, Any] = {
+            "model_id": "qwen3_clone",
+            "character_id": character_id_or_name,
+            "text": text,
+            "speed": speed,
+            "trim_silence": trim_silence,
+        }
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if top_p is not None:
+            payload["top_p"] = top_p
+        if repetition_penalty is not None:
+            payload["repetition_penalty"] = repetition_penalty
+        if seed is not None:
+            payload["seed"] = seed
+        res = self._request_json("POST", "/api/synthesize", payload)
         if output_wav:
             self.download_take(res["take"]["url"], output_wav)
         return res["take"]
@@ -149,8 +178,12 @@ class VoiceForgeClient:
         lines: Optional[List[Dict[str, Any]]] = None,
         cast: Optional[Dict[str, str]] = None,
         default_pause_ms: int = 280,
-        speed: float = 1.15,
-        trim_silence: bool = True,
+        speed: float = 1.0,
+        trim_silence: bool = False,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        repetition_penalty: Optional[float] = None,
+        seed: Optional[int] = None,
         auto_lock_new_characters: bool = True,
         output_wav: Optional[Union[str, Path]] = None,
     ) -> Dict[str, Any]:
@@ -160,7 +193,7 @@ class VoiceForgeClient:
         - Automatically designs & locks brand-new characters when first encountered (`auto_lock_new_characters=True`).
         - Synthesizes each line and stitches them together with `default_pause_ms` (or per-line `pause_after_ms`).
         """
-        payload = {
+        payload: Dict[str, Any] = {
             "title": title,
             "cast": cast or {},
             "lines": lines or [],
@@ -170,6 +203,14 @@ class VoiceForgeClient:
             "trim_silence": trim_silence,
             "auto_lock_new_characters": auto_lock_new_characters,
         }
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if top_p is not None:
+            payload["top_p"] = top_p
+        if repetition_penalty is not None:
+            payload["repetition_penalty"] = repetition_penalty
+        if seed is not None:
+            payload["seed"] = seed
         res = self._request_json("POST", "/api/scenes/render", payload)
         scene = res["scene"]
         if output_wav:
@@ -193,12 +234,15 @@ class VoiceForgeClient:
         speed: Optional[float] = None,
         pause_after_ms: Optional[int] = None,
         temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        repetition_penalty: Optional[float] = None,
+        seed: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        Surgically re-roll (or edit the text/speed/pause/engine of) a single line `line_index` (1-based)
+        Surgically re-roll (or edit the text/speed/pause/engine/sampling params of) a single line `line_index` (1-based)
         in an existing scene and immediately re-stitch the master `.wav`, `.srt`, and `manifest.json`.
         """
-        payload = {"line_index": line_index}
+        payload: Dict[str, Any] = {"line_index": line_index}
         if text is not None:
             payload["text"] = text
         if instruct is not None:
@@ -211,6 +255,12 @@ class VoiceForgeClient:
             payload["pause_after_ms"] = pause_after_ms
         if temperature is not None:
             payload["temperature"] = temperature
+        if top_p is not None:
+            payload["top_p"] = top_p
+        if repetition_penalty is not None:
+            payload["repetition_penalty"] = repetition_penalty
+        if seed is not None:
+            payload["seed"] = seed
         return self._request_json("POST", f"/api/scenes/{scene_id}/reroll-line", payload)["scene"]
 
     def download_scene_bundle(self, scene_id: str, dest_zip_path: Union[str, Path]) -> Path:

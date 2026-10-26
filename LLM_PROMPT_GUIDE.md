@@ -51,11 +51,16 @@ Maya-1 (3.3B Llama + SNAC) expects a concise, structured `instruct` description 
 
 ---
 
-### 4. GOLDEN REFERENCE RULES FOR `qwen3_clone` (Zero-Drift Voice Locking)
+### 4. GOLDEN REFERENCE & RVQ TIMBRE LOCK RULES FOR `qwen3_clone` (Zero-Drift Voice Locking)
 Qwen3-TTS Base uses In-Context Learning (ICL) over the reference audio (`ref_audio`) + verbatim transcript (`ref_text`):
-- **Optimal Reference Duration**: **8 to 14 seconds** of clean, phonetically varied speech (roughly 20–35 words).
-- **Exact Transcript Match**: `ref_text` must match the spoken words in `ref_audio` 100% verbatim with zero `<tags>`.
-- When calling `POST /api/characters/design-and-lock`, always pass a 20–30 word `sample_text` so the locked character has a rock-solid 9-second vocal anchor.
+- **100% Pure Unprocessed Reference**: Golden Reference audio is always saved at `speed=1.0, trim_silence=False` so the 12.5Hz RVQ speech tokenizer aligns `ref_codes` and `ref_text` with zero time-stretch artifacts.
+- **Automatic RVQ Timbre Lock**: VoiceForge automatically locks Qwen3-TTS's 15 Residual Vector Quantization acoustic timbre codebooks (`code_1..code_15`) to low-entropy sampling (`temp <= 0.30, top_p <= 0.75, top_k <= 20`) while allowing `code_0` (prosody/delivery) to express emotion.
+- **Native Sampling Parameters (Exposed Per-Line & Per-Call)**:
+  - `temperature`: `0.50` default for `qwen3_clone` (`0.35–0.50` = ultra-consistent; `0.65–0.85` = more dramatic inflection).
+  - `top_p`: `0.82` default for `qwen3_clone`.
+  - `repetition_penalty`: `1.05` default for Qwen3, `1.15` for Maya-1.
+  - `seed`: Optional deterministic integer seed (automatically anchored per-character if omitted).
+- **Read-Only Acoustic Telemetry**: Every take and scene line returns `pitch_hz_median`, `pitch_semitone_span`, `voice_register`, `words_per_min`, and `rms_dbfs` so you can verify vocal consistency without altering the waveform.
 
 ---
 
@@ -65,9 +70,9 @@ To generate a complete multi-character game skit in a single call, send `POST ht
   - If a speaker name (e.g., `Torvin`) is already in `/api/characters`, VoiceForge automatically reuses their locked voice (`qwen3_clone`).
   - If a speaker name is new, VoiceForge automatically designs their voice, locks a clean Golden Reference into `/api/characters`, and renders all their lines consistently!
 - **Inline Stage Directions in `script_text`**:
-  - `Speaker (voice description for new character) [1.20x, maya1, overlap 200ms]: Dialogue text`
+  - `Speaker (voice description for new character) [temp 0.45, top_p 0.80, seed 42, overlap 200ms]: Dialogue text`
   - Standalone timing lines between turns:
-    - `[Pause: 450ms]` — adds a 450ms dramatic silence beat after the previous line.
+    - `[Pause: 450ms]` or `[pause 1.5s]` — adds a dramatic silence beat after the previous line.
     - `[Overlap: 220ms]` — makes the next speaker interrupt 220ms *before* the previous line finishes!
 
 #### Example `POST /api/scenes/render` Payload:

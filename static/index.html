@@ -1046,27 +1046,27 @@ Torvin: Not me, girl. Not for all the gold in the Citadel."></textarea>
                 </select>
               </div>
               <div class="slider-box">
-                <label><span style="color: #6ee7b7;">⚡ Speaking Speed</span><span id="speedVal" style="color: #6ee7b7;">1.15x</span></label>
-                <input type="range" id="speedSlider" min="0.75" max="1.60" step="0.05" value="1.15" style="accent-color: #10b981;" oninput="document.getElementById('speedVal').textContent = parseFloat(this.value).toFixed(2) + 'x'" />
+                <label><span style="color: #6ee7b7;">⚡ Speaking Speed</span><span id="speedVal" style="color: #6ee7b7;">1.00x</span></label>
+                <input type="range" id="speedSlider" min="0.75" max="1.60" step="0.05" value="1.00" style="accent-color: #10b981;" oninput="document.getElementById('speedVal').textContent = parseFloat(this.value).toFixed(2) + 'x'" />
               </div>
               <div class="slider-box">
                 <label><span>Tighten Pauses</span></label>
                 <label style="display: inline-flex; align-items: center; gap: 5px; cursor: pointer; font-size: 11px; color: #e2e8f0; margin-top: 3px;">
-                  <input type="checkbox" id="trimSilenceCheck" checked style="accent-color: #10b981;" />
+                  <input type="checkbox" id="trimSilenceCheck" style="accent-color: #10b981;" />
                   <span>Auto-Trim</span>
                 </label>
               </div>
               <div class="slider-box">
-                <label><span>Temperature</span><span id="tempVal">0.80</span></label>
-                <input type="range" id="tempSlider" min="0.2" max="1.2" step="0.05" value="0.80" oninput="document.getElementById('tempVal').textContent = parseFloat(this.value).toFixed(2)" />
+                <label><span>Temperature</span><span id="tempVal">0.50</span></label>
+                <input type="range" id="tempSlider" min="0.2" max="1.2" step="0.05" value="0.50" oninput="document.getElementById('tempVal').textContent = parseFloat(this.value).toFixed(2)" />
               </div>
               <div class="slider-box">
-                <label><span>Top-P</span><span id="topPVal">0.95</span></label>
-                <input type="range" id="topPSlider" min="0.5" max="1.0" step="0.05" value="0.95" oninput="document.getElementById('topPVal').textContent = parseFloat(this.value).toFixed(2)" />
+                <label><span>Top-P</span><span id="topPVal">0.85</span></label>
+                <input type="range" id="topPSlider" min="0.5" max="1.0" step="0.05" value="0.85" oninput="document.getElementById('topPVal').textContent = parseFloat(this.value).toFixed(2)" />
               </div>
               <div class="slider-box">
-                <label><span>Rep. Penalty</span><span id="repVal">1.08</span></label>
-                <input type="range" id="repSlider" min="1.0" max="1.4" step="0.02" value="1.08" oninput="document.getElementById('repVal').textContent = parseFloat(this.value).toFixed(2)" />
+                <label><span>Rep. Penalty</span><span id="repVal">1.05</span></label>
+                <input type="range" id="repSlider" min="1.0" max="1.4" step="0.02" value="1.05" oninput="document.getElementById('repVal').textContent = parseFloat(this.value).toFixed(2)" />
               </div>
             </div>
 
@@ -1513,9 +1513,11 @@ Torvin: Not me, girl. Not for all the gold in the Citadel."></textarea>
       state.selectedModelId = modelId;
 
       if (modelId === 'maya1') {
-        setSliders(0.45, 0.90, 1.15);
+        setSliders(0.42, 0.88, 1.15);
+      } else if (modelId === 'qwen3_clone') {
+        setSliders(0.50, 0.82, 1.05);
       } else {
-        setSliders(0.80, 0.95, 1.08);
+        setSliders(0.80, 0.95, 1.05);
       }
 
       // If user was on a preset, automatically adapt the prompt format when switching between Qwen3 and Maya-1
@@ -1770,11 +1772,12 @@ Torvin: Not me, girl. Not for all the gold in the Citadel."></textarea>
 
       document.getElementById('activeTakeModel').textContent = take.model_name;
       const m = take.metrics || {};
+      const pitchBadge = m.pitch_hz_median ? `<span class="metric-chip" title="Read-only measured F0 fundamental frequency">Pitch: <strong>${m.pitch_hz_median} Hz</strong></span>` : '';
       document.getElementById('activeTakeMetrics').innerHTML = `
         <span class="metric-chip">Len: <strong>${m.duration_sec || 0}s</strong></span>
+        ${pitchBadge}
         <span class="metric-chip">Time: <strong>${m.elapsed_sec || 0}s</strong></span>
         <span class="metric-chip">RTF: <strong>${m.rtf || 0}x</strong></span>
-        <span class="metric-chip">24kHz PCM</span>
       `;
       document.getElementById('activeTakeActions').style.display = 'flex';
       const dl = document.getElementById('activeDownloadLink');

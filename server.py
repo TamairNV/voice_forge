@@ -162,30 +162,34 @@ class SynthesizeRequest(BaseModel):
         description="Spoken language ('english', 'auto', 'chinese', 'japanese', 'korean', 'french', 'german', 'spanish').",
     )
     speed: float = Field(
-        1.15,
+        1.0,
         ge=0.5,
         le=2.0,
-        description="Pitch-preserving speaking speed multiplier (1.0 = normal, 1.15 = snappy default, 1.35 = fast).",
+        description="Optional speaking speed multiplier (1.0 = pure unprocessed neural output by default; set >1.0 only if tempo stretch is desired).",
     )
     trim_silence: bool = Field(
-        True,
-        description="Automatically tighten awkward dead-air pauses (>120ms) between phrases.",
+        False,
+        description="Optional silence trimming (False = pure unprocessed neural output by default).",
     )
     temperature: Optional[float] = Field(
         None,
-        description="Sampling temperature (defaults to 0.80 for Qwen3, 0.45 for Maya-1).",
+        description="Native model sampling temperature (defaults to 0.50 for Qwen3 Clone, 0.80 for Qwen3 Design, 0.42 for Maya-1).",
     )
     top_p: Optional[float] = Field(
         None,
-        description="Nucleus sampling top_p (defaults to 0.95 for Qwen3, 0.90 for Maya-1).",
+        description="Native nucleus sampling top_p (defaults to 0.82 for Qwen3 Clone, 0.95 for Qwen3 Design, 0.88 for Maya-1).",
     )
     repetition_penalty: Optional[float] = Field(
         None,
-        description="Repetition penalty (defaults to 1.08 for Qwen3, 1.15 for Maya-1).",
+        description="Native repetition penalty (defaults to 1.05 for Qwen3, 1.15 for Maya-1).",
+    )
+    seed: Optional[int] = Field(
+        None,
+        description="Optional deterministic MLX random seed. In `qwen3_clone`, automatically defaults to a stable per-character seed if omitted.",
     )
     character_id: Optional[str] = Field(
         None,
-        description="ID or exact name of a locked character from `/api/characters` when using `model_id='qwen3_clone'`.",
+        description="ID or exact name of a locked character from `/api/characters` when using `model_id='qwen3_clone'` (or for Maya-1 SNAC reference locking).",
     )
 
 
@@ -201,11 +205,11 @@ class DesignAndLockRequest(BaseModel):
         "qwen3_voicedesign",
         description="Which voice-design engine to generate the golden sample with ('qwen3_voicedesign' or 'maya1').",
     )
-    speed: float = Field(1.15, ge=0.5, le=2.0, description="Speaking speed multiplier.")
-    trim_silence: bool = Field(True, description="Tighten pauses in the generated golden sample.")
-
-
-classSaveCharacterFromTakeRequest = BaseModel
+    speed: float = Field(1.0, ge=0.5, le=2.0, description="Speaking speed multiplier (1.0 = pure unprocessed Golden Reference).")
+    trim_silence: bool = Field(False, description="Keep False so the Golden Reference waveform is 100% pure for ICL tokenization.")
+    temperature: Optional[float] = Field(None, description="Optional native sampling temperature for designing the voice.")
+    top_p: Optional[float] = Field(None, description="Optional native top_p for designing the voice.")
+    seed: Optional[int] = Field(None, description="Optional deterministic seed for designing the voice.")
 
 
 class SaveCharacterFromTakeRequest(BaseModel):
@@ -229,7 +233,7 @@ class OpenAISpeechRequest(BaseModel):
         None,
         description="Natural language voice description (overrides `voice` description for Qwen3 VoiceDesign / Maya-1).",
     )
-    speed: float = Field(1.15, ge=0.5, le=2.0, description="Speaking speed multiplier (0.5 to 2.0).")
+    speed: float = Field(1.0, ge=0.5, le=2.0, description="Speaking speed multiplier (1.0 = pure unprocessed neural audio).")
 
 
 class SceneLineItem(BaseModel):
@@ -256,6 +260,22 @@ class SceneLineItem(BaseModel):
         le=2.0,
         description="Optional speaking speed override for this line.",
     )
+    temperature: Optional[float] = Field(
+        None,
+        description="Optional native sampling temperature override for this line (e.g., 0.45 for ultra-consistent, 0.75 for wild emotional inflection).",
+    )
+    top_p: Optional[float] = Field(
+        None,
+        description="Optional native nucleus sampling top_p override for this line.",
+    )
+    repetition_penalty: Optional[float] = Field(
+        None,
+        description="Optional native repetition penalty override for this line.",
+    )
+    seed: Optional[int] = Field(
+        None,
+        description="Optional deterministic random seed override for this line.",
+    )
     pause_after_ms: Optional[int] = Field(
         None,
         ge=-2000,
@@ -273,13 +293,16 @@ class RerollSceneLineRequest(BaseModel):
     speed: Optional[float] = Field(None, ge=0.5, le=2.0, description="Optional speaking speed multiplier for this line.")
     pause_after_ms: Optional[int] = Field(None, ge=-2000, le=5000, description="Optional updated pause/overlap after this line in ms.")
     temperature: Optional[float] = Field(None, description="Optional sampling temperature override for a fresh vocal take.")
+    top_p: Optional[float] = Field(None, description="Optional nucleus sampling top_p override.")
+    repetition_penalty: Optional[float] = Field(None, description="Optional repetition penalty override.")
+    seed: Optional[int] = Field(None, description="Optional random seed override (pass a new integer to force a different vocal inflection take).")
 
 
 class SceneRenderRequest(BaseModel):
     """
     Multi-character Scene & Script Renderer for LLMs and Game Engines.
     Provide either:
-      - `lines`: Structured list of `{speaker, text, instruct?, pause_after_ms?}` objects, OR
+      - `lines`: Structured list of `{speaker, text, instruct?, pause_after_ms?, temperature?, top_p?, seed?}` objects, OR
       - `script_text`: Plain-text script where each line is `Speaker Name (optional voice description): Dialogue text`
     Automatically reuses existing locked characters by name, or creates + locks brand-new characters on the fly,
     synthesizes every segment, and stitches them into a single master 24kHz `.wav` scene with natural turn-taking pauses!
@@ -308,14 +331,30 @@ class SceneRenderRequest(BaseModel):
         description="Default silence gap (or negative overlap in ms) inserted between dialogue turns when stitching the scene.",
     )
     speed: float = Field(
-        1.15,
+        1.0,
         ge=0.5,
         le=2.0,
-        description="Default speaking speed multiplier across the scene.",
+        description="Default speaking speed multiplier across the scene (1.0 = pure unprocessed neural output by default).",
     )
     trim_silence: bool = Field(
-        True,
-        description="Tighten internal pauses within each segment before stitching.",
+        False,
+        description="Optional silence trimming (False = pure unprocessed neural output by default).",
+    )
+    temperature: Optional[float] = Field(
+        None,
+        description="Optional scene-wide default native sampling temperature.",
+    )
+    top_p: Optional[float] = Field(
+        None,
+        description="Optional scene-wide default native top_p.",
+    )
+    repetition_penalty: Optional[float] = Field(
+        None,
+        description="Optional scene-wide default native repetition penalty.",
+    )
+    seed: Optional[int] = Field(
+        None,
+        description="Optional scene-wide default deterministic seed.",
     )
     auto_lock_new_characters: bool = Field(
         True,
@@ -487,19 +526,20 @@ def _run_synthesis_and_save(req: SynthesizeRequest) -> dict:
     character_name = None
     resolved_char_id = req.character_id
 
-    if req.model_id == "qwen3_clone":
-        if not req.character_id:
-            raise HTTPException(
-                status_code=400,
-                detail="Please provide `character_id` (or character name) from `/api/characters` when using `qwen3_clone`.",
-            )
+    if req.character_id:
         char = _resolve_character(req.character_id)
-        if not char:
+        if not char and req.model_id == "qwen3_clone":
             raise HTTPException(status_code=404, detail=f"Character '{req.character_id}' not found in Character Locker.")
-        ref_audio_path = str(CHARACTERS_DIR / char["audio_file"])
-        ref_text = char["ref_text"]
-        character_name = char["name"]
-        resolved_char_id = char["id"]
+        if char:
+            ref_audio_path = str(CHARACTERS_DIR / char["audio_file"])
+            ref_text = char["ref_text"]
+            character_name = char["name"]
+            resolved_char_id = char["id"]
+    elif req.model_id == "qwen3_clone":
+        raise HTTPException(
+            status_code=400,
+            detail="Please provide `character_id` (or character name) from `/api/characters` when using `qwen3_clone`.",
+        )
 
     try:
         audio_np, sr, metrics = engine.synthesize(
@@ -512,6 +552,7 @@ def _run_synthesis_and_save(req: SynthesizeRequest) -> dict:
             temperature=req.temperature,
             top_p=req.top_p,
             repetition_penalty=req.repetition_penalty,
+            seed=req.seed,
             ref_audio_path=ref_audio_path,
             ref_text=ref_text,
         )
@@ -635,8 +676,11 @@ def api_design_and_lock_character(req: DesignAndLockRequest):
             model_id=req.design_model_id,
             text=req.sample_text,
             instruct=req.instruct,
-            speed=req.speed,
-            trim_silence=req.trim_silence,
+            speed=1.0,
+            trim_silence=False,
+            temperature=req.temperature,
+            top_p=req.top_p,
+            seed=req.seed,
         )
     )
 
@@ -862,6 +906,10 @@ def _parse_script_text_to_lines(script_text: str) -> List[SceneLineItem]:
             model_id = None
             speed = None
             pause_after_ms = None
+            temperature = None
+            top_p = None
+            repetition_penalty = None
+            seed = None
 
             if directives:
                 if "maya" in directives:
@@ -875,9 +923,22 @@ def _parse_script_text_to_lines(script_text: str) -> List[SceneLineItem]:
                 if spd_m:
                     speed = max(0.5, min(2.0, float(spd_m.group(1))))
                 elif "fast" in directives:
-                    speed = 1.30
+                    speed = 1.25
                 elif "slow" in directives:
                     speed = 0.92
+
+                tmp_m = re.search(r"temp(?:erature)?\s*[:=]?\s*(\d+(?:\.\d+)?)", directives)
+                if tmp_m:
+                    temperature = float(tmp_m.group(1))
+                tp_m = re.search(r"top_p\s*[:=]?\s*(\d+(?:\.\d+)?)", directives)
+                if tp_m:
+                    top_p = float(tp_m.group(1))
+                rp_m = re.search(r"rep(?:etition)?(?:_penalty)?\s*[:=]?\s*(\d+(?:\.\d+)?)", directives)
+                if rp_m:
+                    repetition_penalty = float(rp_m.group(1))
+                sd_m = re.search(r"seed\s*[:=]?\s*(\d+)", directives)
+                if sd_m:
+                    seed = int(sd_m.group(1))
 
                 ov_m = re.search(r"overlap\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(ms|s)?", directives)
                 if ov_m:
@@ -898,6 +959,10 @@ def _parse_script_text_to_lines(script_text: str) -> List[SceneLineItem]:
                         instruct=instruct,
                         model_id=model_id,
                         speed=speed,
+                        temperature=temperature,
+                        top_p=top_p,
+                        repetition_penalty=repetition_penalty,
+                        seed=seed,
                         pause_after_ms=pause_after_ms,
                     )
                 )
@@ -1123,8 +1188,11 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
                     model_id=anchor_engine,
                     text=anchor_text,
                     instruct=instruct,
-                    speed=req.speed,
-                    trim_silence=True,
+                    speed=1.0,
+                    trim_silence=False,
+                    temperature=line.temperature if line.temperature is not None else req.temperature,
+                    top_p=line.top_p if line.top_p is not None else req.top_p,
+                    seed=line.seed if line.seed is not None else req.seed,
                 )
             )
             locked_char = api_save_character_from_take(
@@ -1138,13 +1206,18 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
             model_swaps += 1
             last_used_model = design_engine
 
+        # When auto-locking from Line #1, always synthesize the reference cleanly at speed=1.0, trim_silence=False
         take = _run_synthesis_and_save(
             SynthesizeRequest(
                 model_id=design_engine,
                 text=first_line_text,
                 instruct=instruct,
-                speed=line_speed,
-                trim_silence=req.trim_silence,
+                speed=1.0 if req.auto_lock_new_characters else line_speed,
+                trim_silence=False if req.auto_lock_new_characters else req.trim_silence,
+                temperature=line.temperature if line.temperature is not None else req.temperature,
+                top_p=line.top_p if line.top_p is not None else req.top_p,
+                repetition_penalty=line.repetition_penalty if line.repetition_penalty is not None else req.repetition_penalty,
+                seed=line.seed if line.seed is not None else req.seed,
             )
         )
         action = "designed_new_voice"
@@ -1169,13 +1242,22 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
         l = lines[idx]
         s_key = l.speaker.strip().lower()
         has_locked = (s_key in resolved_cast_map) or (_resolve_character(l.speaker.strip()) is not None)
+        # If the character is already locked in the Character Locker, ALWAYS use `qwen3_clone`
+        # unless the line explicitly contains a Maya-1 vocal sound tag (<laugh>, <sigh>, <gasp>, etc.)
+        # AND explicitly requests `model_id='maya1'`. This stops LLMs from accidentally drifting voices!
+        has_maya_vocal_tag = any(
+            t in l.text.lower()
+            for t in ("<laugh", "<chuckle", "<giggle", "<sigh", "<gasp", "<gulp", "<snort", "<cry", "<scream", "<sing")
+        )
+        if has_locked:
+            if l.model_id == "maya1" and has_maya_vocal_tag:
+                return "maya1"
+            return "qwen3_clone"
         if l.model_id == "maya1":
             return "maya1"
         if l.model_id == "qwen3_voicedesign":
             return "qwen3_voicedesign"
-        if has_locked:
-            return "qwen3_clone"
-        return "maya1" if ("<" in l.text and ">" in l.text) else "qwen3_voicedesign"
+        return "maya1" if has_maya_vocal_tag else "qwen3_voicedesign"
 
     # Prefer rendering whichever engine is ALREADY loaded in VRAM first!
     def _sort_key_for_remaining(idx: int):
@@ -1188,6 +1270,10 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
         s_key = speaker.lower()
         target_eng = _target_engine_for_remaining(idx)
         line_speed = line.speed if line.speed is not None else req.speed
+        line_temp = line.temperature if line.temperature is not None else req.temperature
+        line_top_p = line.top_p if line.top_p is not None else req.top_p
+        line_rep = line.repetition_penalty if line.repetition_penalty is not None else req.repetition_penalty
+        line_seed = line.seed if line.seed is not None else req.seed
         existing_char = resolved_cast_map.get(s_key) or _resolve_character(speaker)
 
         if target_eng != last_used_model:
@@ -1202,6 +1288,10 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
                     text=line.text.strip(),
                     speed=line_speed,
                     trim_silence=req.trim_silence,
+                    temperature=line_temp,
+                    top_p=line_top_p,
+                    repetition_penalty=line_rep,
+                    seed=line_seed,
                 )
             )
             action = "reused_locked_character"
@@ -1217,10 +1307,15 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
             take = _run_synthesis_and_save(
                 SynthesizeRequest(
                     model_id=target_eng,
+                    character_id=existing_char["id"] if existing_char else None,
                     text=line.text.strip(),
                     instruct=instruct,
                     speed=line_speed,
                     trim_silence=req.trim_silence,
+                    temperature=line_temp,
+                    top_p=line_top_p,
+                    repetition_penalty=line_rep,
+                    seed=line_seed,
                 )
             )
             action = "reused_character_with_maya1" if existing_char else f"designed_with_{target_eng}"
@@ -1254,6 +1349,8 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
             "text": line.text.strip(),
             "instruct": instruct_used,
             "speed": line_speed,
+            "pitch_hz_median": take["metrics"].get("pitch_hz_median", 0.0),
+            "voice_register": take["metrics"].get("voice_register", ""),
             "take_id": take["id"],
             "take_url": take["url"],
             "duration_sec": take["metrics"]["duration_sec"],
@@ -1352,7 +1449,7 @@ def api_reroll_scene_line(scene_id: str, req: RerollSceneLineRequest):
 
     speaker = target_seg["speaker"]
     new_text = (req.text if req.text is not None else target_seg["text"]).strip()
-    new_speed = req.speed if req.speed is not None else float(target_seg.get("speed", 1.15))
+    new_speed = req.speed if req.speed is not None else float(target_seg.get("speed", 1.0))
     char_obj = _resolve_character(target_seg.get("character_id") or speaker)
 
     model_id = req.model_id or target_seg.get("model_id") or ("qwen3_clone" if char_obj else "qwen3_voicedesign")
@@ -1367,9 +1464,12 @@ def api_reroll_scene_line(scene_id: str, req: RerollSceneLineRequest):
         model_id=model_id,
         text=new_text,
         instruct=instruct,
-        character_id=char_obj["id"] if (model_id == "qwen3_clone" and char_obj) else None,
+        character_id=char_obj["id"] if char_obj else None,
         speed=new_speed,
         temperature=req.temperature,
+        top_p=req.top_p,
+        repetition_penalty=req.repetition_penalty,
+        seed=req.seed,
     )
     new_take = _run_synthesis_and_save(synth_req)
 
@@ -1377,6 +1477,8 @@ def api_reroll_scene_line(scene_id: str, req: RerollSceneLineRequest):
     target_seg["instruct"] = instruct
     target_seg["model_id"] = model_id
     target_seg["speed"] = new_speed
+    target_seg["pitch_hz_median"] = new_take["metrics"].get("pitch_hz_median", 0.0)
+    target_seg["voice_register"] = new_take["metrics"].get("voice_register", "")
     target_seg["take_id"] = new_take["id"]
     target_seg["take_url"] = new_take["url"]
     target_seg["action"] = f"rerolled_with_{model_id}"

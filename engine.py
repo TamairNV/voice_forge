@@ -75,23 +75,130 @@ def normalize_studio_loudness(
     return audio
 
 
+def analyze_voice_acoustics(
+    audio_np: np.ndarray,
+    sr: int = 24000,
+    spoken_text: str = "",
+) -> Dict[str, Any]:
+    """
+    Read-only acoustic telemetry analyzer (does NOT modify audio):
+      - Measures fundamental vocal pitch (F0 in Hz) across voiced frames via normalized autocorrelation (65Hz–450Hz)
+      - Computes pitch median (Hz), 10th–90th percentile range (Hz), and intonation span (semitones)
+      - Classifies vocal register and measures spoken cadence (words per minute)
+    """
+    if audio_np.size < int(sr * 0.08):
+        return {
+            "pitch_hz_median": 0.0,
+            "pitch_hz_p10": 0.0,
+            "pitch_hz_p90": 0.0,
+            "pitch_semitone_span": 0.0,
+            "voice_register": "Unknown",
+            "rms_dbfs": -60.0,
+            "words_per_min": 0,
+        }
+
+    audio = audio_np.astype(np.float32)
+    duration_sec = max(0.01, audio.shape[0] / sr)
+
+    active_samples = audio[np.abs(audio) > 0.01]
+    rms_val = float(np.sqrt(np.mean((active_samples if active_samples.size > 100 else audio) ** 2))) + 1e-9
+    rms_dbfs = round(20.0 * float(np.log10(rms_val)), 1)
+
+    frame_len = int(sr * 0.04)
+    hop_len = int(sr * 0.02)
+    min_lag = int(sr / 450.0)
+    max_lag = int(sr / 65.0)
+
+    n_frames = max(0, (audio.shape[0] - frame_len) // hop_len + 1)
+    f0_estimates: List[float] = []
+
+    if n_frames > 0:
+        window = np.hanning(frame_len).astype(np.float32)
+        fft_len = 2048
+        frame_energies = []
+        frames_list = []
+        for i in range(n_frames):
+            f = audio[i * hop_len : i * hop_len + frame_len]
+            frame_energies.append(float(np.sqrt(np.mean(f ** 2))))
+            frames_list.append(f)
+
+        energy_thresh = max(0.015, float(np.percentile(frame_energies, 35)))
+        for f, e in zip(frames_list, frame_energies):
+            if e < energy_thresh:
+                continue
+            fw = (f - float(np.mean(f))) * window
+            zcr = float(np.mean(np.abs(np.diff(np.signbit(fw)))))
+            if zcr > 0.22:
+                continue
+
+            spec = np.fft.rfft(fw, n=fft_len)
+            acf = np.fft.irfft(spec * np.conj(spec), n=fft_len)[: max_lag + 2]
+            if acf[0] <= 1e-8:
+                continue
+            acf_norm = acf / acf[0]
+            search_region = acf_norm[min_lag : max_lag + 1]
+            if search_region.size == 0:
+                continue
+
+            peak_idx = int(np.argmax(search_region))
+            if float(search_region[peak_idx]) >= 0.48:
+                lag = min_lag + peak_idx
+                f0 = float(sr / lag)
+                if 65.0 <= f0 <= 450.0:
+                    f0_estimates.append(f0)
+
+    if f0_estimates:
+        f0_arr = np.array(f0_estimates, dtype=np.float32)
+        p_med = float(np.median(f0_arr))
+        p_10 = float(np.percentile(f0_arr, 10))
+        p_90 = float(np.percentile(f0_arr, 90))
+        semitone_span = 12.0 * float(np.log2(max(p_90, 1.0) / max(p_10, 1.0)))
+    else:
+        p_med = p_10 = p_90 = semitone_span = 0.0
+
+    if p_med <= 0:
+        register = "Unvoiced / Whisper"
+    elif p_med < 105:
+        register = "Deep Bass (<105 Hz)"
+    elif p_med < 145:
+        register = "Baritone (105–145 Hz)"
+    elif p_med < 185:
+        register = "Tenor / Low Alto (145–185 Hz)"
+    elif p_med < 235:
+        register = "Alto / Mezzo (185–235 Hz)"
+    else:
+        register = "High / Soprano (235+ Hz)"
+
+    clean_words = [w for w in re.sub(r"<[^>]+>", " ", spoken_text or "").split() if any(c.isalnum() for c in w)]
+    wpm = int(round((len(clean_words) / duration_sec) * 60.0)) if clean_words else 0
+
+    return {
+        "pitch_hz_median": round(p_med, 1),
+        "pitch_hz_p10": round(p_10, 1),
+        "pitch_hz_p90": round(p_90, 1),
+        "pitch_semitone_span": round(semitone_span, 1),
+        "voice_register": register,
+        "rms_dbfs": rms_dbfs,
+        "words_per_min": wpm,
+    }
+
+
 def apply_studio_pacing(
     audio_np: np.ndarray,
     sr: int = 24000,
     speed: float = 1.0,
-    trim_silence: bool = True,
-    normalize_audio: bool = True,
+    trim_silence: bool = False,
+    normalize_audio: bool = False,
 ) -> np.ndarray:
     """
-    Studio post-processor:
-    1. Trim leading/trailing dead air and tighten long internal pauses (>240ms) down to snappy ~110ms breaths.
-    2. Apply pitch-preserving SOLA time-stretching via ffmpeg `atempo` when speed != 1.0.
-    3. Normalize loudness and apply click-free micro-fades.
+    Optional post-processor (OFF by default: `speed=1.0, trim_silence=False, normalize_audio=False`
+    returns the 100% raw, bit-exact neural waveform from Qwen3-TTS / Maya-1!).
+    Only runs silence trimming or ffmpeg `atempo` if explicitly requested.
     """
     if audio_np.size == 0:
         return audio_np
 
-    # Step 1: Trim leading/trailing silence & tighten dead-air pauses if enabled
+    # Step 1: Trim leading/trailing silence & tighten dead-air pauses ONLY if explicitly enabled
     if trim_silence:
         win = int(sr * 0.02)  # 20ms frame
         if len(audio_np) > win * 6:
@@ -101,7 +208,6 @@ def apply_studio_pacing(
             thresh = max(0.004, float(np.percentile(rms, 15)) * 1.25)
             is_silent = rms < thresh
 
-            # Trim leading & trailing silence (keep 2 frames = 40ms padding)
             non_silent_idx = np.where(~is_silent)[0]
             if non_silent_idx.size > 0:
                 first_f = max(0, int(non_silent_idx[0]) - 2)
@@ -125,7 +231,7 @@ def apply_studio_pacing(
             if keep_chunks:
                 audio_np = np.concatenate(keep_chunks, axis=0)
 
-    # Step 2: Pitch-preserving tempo adjustment via ffmpeg atempo
+    # Step 2: Pitch-preserving tempo adjustment ONLY if speed != 1.0
     if speed is not None and abs(speed - 1.0) >= 0.02:
         clamped_speed = max(0.5, min(2.0, float(speed)))
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -520,6 +626,52 @@ class Maya1MLXRunner:
             ])
         return [l1, l2, l3]
 
+    @staticmethod
+    def pack_snac_to_7(levels: List[List[int]]) -> List[int]:
+        """
+        Inverse of `unpack_snac_from_7`: packs 3 hierarchical SNAC code levels `[l1, l2, l3]`
+        into Maya-1's 7-token-per-frame interleaved format for SNAC Audio-Prefix In-Context Voice Locking!
+        """
+        l1, l2, l3 = levels[0], levels[1], levels[2]
+        frames = min(len(l1), len(l2) // 2, len(l3) // 4)
+        packed: List[int] = []
+        for i in range(frames):
+            s0 = CODE_TOKEN_OFFSET + 0 * 4096 + int(l1[i])
+            s1 = CODE_TOKEN_OFFSET + 1 * 4096 + int(l2[2 * i])
+            s2 = CODE_TOKEN_OFFSET + 2 * 4096 + int(l3[4 * i])
+            s3 = CODE_TOKEN_OFFSET + 3 * 4096 + int(l3[4 * i + 1])
+            s4 = CODE_TOKEN_OFFSET + 4 * 4096 + int(l2[2 * i + 1])
+            s5 = CODE_TOKEN_OFFSET + 5 * 4096 + int(l3[4 * i + 2])
+            s6 = CODE_TOKEN_OFFSET + 6 * 4096 + int(l3[4 * i + 3])
+            packed.extend([s0, s1, s2, s3, s4, s5, s6])
+        return packed
+
+    def encode_reference_audio_tokens(self, ref_audio_path: str, max_ref_sec: float = 4.5) -> List[int]:
+        """
+        Encodes a saved Character Voice `.wav` into Maya-1 7-slot SNAC tokens so Maya-1 can
+        continue the exact speaker's voice while still executing `<laugh>`, `<sigh>`, `<gasp>` tags!
+        """
+        audio_np, sr = sf.read(ref_audio_path, dtype="float32")
+        if audio_np.ndim > 1:
+            audio_np = audio_np.mean(axis=1)
+        if sr != self.sample_rate and audio_np.size > 0:
+            # Simple linear interpolation to 24kHz if needed
+            duration = audio_np.shape[0] / sr
+            target_len = int(duration * self.sample_rate)
+            audio_np = np.interp(
+                np.linspace(0.0, 1.0, target_len, endpoint=False),
+                np.linspace(0.0, 1.0, audio_np.shape[0], endpoint=False),
+                audio_np,
+            ).astype(np.float32)
+        max_samples = int(max_ref_sec * self.sample_rate)
+        if audio_np.shape[0] > max_samples:
+            audio_np = audio_np[:max_samples]
+        audio_mx = mx.array(audio_np, dtype=mx.float32)[None, None, :]
+        codes = self.snac.encode(audio_mx)
+        mx.eval(codes)
+        levels = [np.array(c.squeeze(0), dtype=np.int32).tolist() for c in codes]
+        return self.pack_snac_to_7(levels)
+
     def generate(
         self,
         text: str,
@@ -528,10 +680,29 @@ class Maya1MLXRunner:
         top_p: float = 0.9,
         repetition_penalty: float = 1.15,
         max_tokens: int = 2048,
+        ref_audio_path: Optional[str] = None,
+        ref_text: Optional[str] = None,
     ) -> Tuple[np.ndarray, Dict[str, Any]]:
         t0 = time.perf_counter()
-        prompt_str = self.build_prompt(instruct, text)
+        ref_snac_tokens: List[int] = []
+        ref_frames: int = 0
+
+        if ref_audio_path and ref_text and Path(ref_audio_path).exists():
+            # Trim reference text slightly if we cap reference audio to 4.5s, or use full short ref
+            audio_info = sf.info(ref_audio_path)
+            if audio_info.duration <= 6.5:
+                ref_snac_tokens = self.encode_reference_audio_tokens(ref_audio_path, max_ref_sec=6.5)
+                ref_frames = len(ref_snac_tokens) // SNAC_TOKENS_PER_FRAME
+                combined_text = f"{ref_text.strip()} {text.strip()}"
+                prompt_str = self.build_prompt(instruct, combined_text)
+            else:
+                prompt_str = self.build_prompt(instruct, text)
+        else:
+            prompt_str = self.build_prompt(instruct, text)
+
         encoded = self.tokenizer.encode(prompt_str, add_special_tokens=False)
+        if ref_snac_tokens:
+            encoded = encoded + ref_snac_tokens
         prompt_ids = mx.array(encoded, dtype=mx.int32)
 
         sampler = make_sampler(temperature, top_p, top_k=50)
@@ -558,18 +729,33 @@ class Maya1MLXRunner:
                 mx.clear_cache()
 
         snac_tokens = self.extract_snac_codes(generated_ids)
-        levels = self.unpack_snac_from_7(snac_tokens)
-        if not levels[0]:
-            raise RuntimeError("Maya-1 did not produce enough acoustic tokens. Try adjusting temperature or description.")
+        if ref_snac_tokens:
+            # Decode together with reference prefix for seamless SNAC convolutional state, then slice!
+            full_levels = self.unpack_snac_from_7(ref_snac_tokens + snac_tokens)
+            gen_levels = self.unpack_snac_from_7(snac_tokens)
+            if not gen_levels[0]:
+                raise RuntimeError("Maya-1 did not produce enough acoustic tokens.")
+            codes_mx = [mx.array(level, dtype=mx.int32)[None, :] for level in full_levels]
+            audio_hat = self.snac.decode(codes_mx).squeeze()
+            mx.eval(audio_hat)
+            full_audio_np = np.array(audio_hat, dtype=np.float32)
+            # Each SNAC frame (1 l1 token) corresponds to 2048 audio samples at 24kHz
+            slice_sample = ref_frames * 2048
+            audio_np = full_audio_np[slice_sample:] if full_audio_np.shape[0] > slice_sample else full_audio_np
+            levels = gen_levels
+        else:
+            levels = self.unpack_snac_from_7(snac_tokens)
+            if not levels[0]:
+                raise RuntimeError("Maya-1 did not produce enough acoustic tokens. Try adjusting temperature or description.")
 
-        codes_mx = [mx.array(level, dtype=mx.int32)[None, :] for level in levels]
-        audio_hat = self.snac.decode(codes_mx).squeeze()
-        mx.eval(audio_hat)
-        audio_np = np.array(audio_hat, dtype=np.float32)
+            codes_mx = [mx.array(level, dtype=mx.int32)[None, :] for level in levels]
+            audio_hat = self.snac.decode(codes_mx).squeeze()
+            mx.eval(audio_hat)
+            audio_np = np.array(audio_hat, dtype=np.float32)
 
-        # Trim 2048-sample SNAC decoder warm-up transient if present
-        if audio_np.shape[0] > 4096:
-            audio_np = audio_np[2048:]
+            # Trim 2048-sample SNAC decoder warm-up transient if present
+            if audio_np.shape[0] > 4096:
+                audio_np = audio_np[2048:]
 
         elapsed = time.perf_counter() - t0
         duration = audio_np.shape[0] / self.sample_rate
@@ -581,8 +767,50 @@ class Maya1MLXRunner:
             "rtf": round(duration / elapsed, 2) if elapsed > 0 else 0,
             "tokens": len(generated_ids),
             "frames": len(levels[0]),
+            "snac_voice_locked": bool(ref_snac_tokens),
             "peak_memory_gb": round(mx.get_peak_memory() / 1e9, 2),
         }
+
+
+def _install_qwen3_timbre_lock(model: Any) -> None:
+    """
+    Separates Qwen3-TTS's Prosody/Cadence sampling (`code_0`, where `suppress_tokens` is provided)
+    from its 15 Residual Vector Quantization (RVQ) Acoustic Timbre Codebooks (`code_1..code_15`,
+    where `suppress_tokens is None` inside `code_predictor`).
+    By clamping the 15 acoustic timbre codebooks to low-entropy sampling (`temperature <= 0.30`,
+    `top_p <= 0.75`, `top_k <= 20`), the character's vocal cords, formants, and accent stay 100%
+    locked to the Golden Reference across every line, while `code_0` remains expressive!
+    """
+    talker = getattr(model, "talker", None)
+    if talker is None or getattr(talker, "_timbre_lock_installed", False):
+        return
+    orig_sample_token = getattr(model, "_sample_token", None)
+    if orig_sample_token is None:
+        return
+
+    def _timbre_locked_sample_token(logits, *args, **kwargs):
+        suppress_tokens = kwargs.get("suppress_tokens", None)
+        if suppress_tokens is None and getattr(model, "_lock_rvq_timbre", False):
+            # Sampling RVQ acoustic timbre codebooks code_1..code_15: clamp entropy!
+            if "temperature" in kwargs:
+                kwargs["temperature"] = min(float(kwargs["temperature"]), 0.30)
+            if "top_p" in kwargs:
+                kwargs["top_p"] = min(float(kwargs["top_p"]), 0.75)
+            if "top_k" in kwargs:
+                kwargs["top_k"] = min(int(kwargs["top_k"]), 20)
+        return orig_sample_token(logits, *args, **kwargs)
+
+    model._sample_token = _timbre_locked_sample_token
+    model._lock_rvq_timbre = True
+    talker._timbre_lock_installed = True
+
+
+def _derive_deterministic_seed(key_str: str) -> int:
+    """Derives a stable 31-bit integer seed from a character's reference audio path or name."""
+    h = 2166136261
+    for ch in (key_str or "voiceforge"):
+        h = ((h ^ ord(ch)) * 16777619) & 0x7FFFFFFF
+    return max(1, h)
 
 
 class VoiceForgeEngine:
@@ -632,6 +860,7 @@ class VoiceForgeEngine:
                     self.active_model = Maya1MLXRunner(info["repo"])
                 else:
                     self.active_model = load_mlx_tts_model(info["repo"])
+                    _install_qwen3_timbre_lock(self.active_model)
 
                 load_sec = time.perf_counter() - t0
                 self.active_model_id = model_id
@@ -650,10 +879,11 @@ class VoiceForgeEngine:
         instruct: str = "",
         language: str = "english",
         speed: float = 1.0,
-        trim_silence: bool = True,
+        trim_silence: bool = False,
         temperature: Optional[float] = None,
         top_p: Optional[float] = None,
         repetition_penalty: Optional[float] = None,
+        seed: Optional[int] = None,
         ref_audio_path: Optional[str] = None,
         ref_text: Optional[str] = None,
     ) -> Tuple[np.ndarray, int, Dict[str, Any]]:
@@ -669,29 +899,46 @@ class VoiceForgeEngine:
             clean_text, extracted_tags = sanitize_dialogue_for_model(text, model_id=model_id)
             compiled_instruct = compile_voice_instruct(instruct, model_id=model_id, extracted_tags=extracted_tags)
 
+            # Set deterministic MLX random seed if provided or if locking to a reference character
+            effective_seed = seed
+            if effective_seed is None and ref_audio_path:
+                effective_seed = _derive_deterministic_seed(str(ref_audio_path))
+            if effective_seed is not None:
+                mx.random.seed(int(effective_seed))
+
             if info["family"] == "maya1":
-                temp = temperature if temperature is not None else 0.45
-                tp = top_p if top_p is not None else 0.90
+                temp = temperature if temperature is not None else 0.42
+                tp = top_p if top_p is not None else 0.88
                 rp = repetition_penalty if repetition_penalty is not None else 1.15
+                clean_ref_text = None
+                if ref_text:
+                    clean_ref_text, _ = sanitize_dialogue_for_model(ref_text, model_id="qwen3_clone")
                 audio_np, metrics = self.active_model.generate(
                     text=clean_text,
                     instruct=compiled_instruct,
                     temperature=temp,
                     top_p=tp,
                     repetition_penalty=rp,
+                    ref_audio_path=ref_audio_path,
+                    ref_text=clean_ref_text,
                 )
                 audio_np = apply_studio_pacing(audio_np, 24000, speed=speed, trim_silence=trim_silence)
+                acoustics = analyze_voice_acoustics(audio_np, 24000, clean_text)
+                metrics.update(acoustics)
                 metrics["duration_sec"] = round(audio_np.shape[0] / 24000, 2)
                 metrics["speed"] = round(speed, 2)
+                metrics["temperature"] = round(temp, 2)
+                metrics["top_p"] = round(tp, 2)
+                metrics["seed"] = effective_seed
                 metrics["compiled_instruct"] = compiled_instruct
                 return audio_np, 24000, metrics
 
             # Qwen3-TTS family
-            temp = temperature if temperature is not None else 0.85
-            tp = top_p if top_p is not None else 1.0
-            rp = repetition_penalty if repetition_penalty is not None else 1.05
-
             if info["mode"] == "voice_design":
+                temp = temperature if temperature is not None else 0.80
+                tp = top_p if top_p is not None else 0.95
+                rp = repetition_penalty if repetition_penalty is not None else 1.05
+                self.active_model._lock_rvq_timbre = False
                 if not instruct.strip():
                     raise ValueError("Please provide a character/voice description for Qwen3 VoiceDesign.")
                 results = list(
@@ -705,6 +952,11 @@ class VoiceForgeEngine:
                     )
                 )
             elif info["mode"] == "voice_clone":
+                # Lower default temperature (0.50) & top_p (0.82) + RVQ Timbre Lock for 100% consistent NPC voice!
+                temp = temperature if temperature is not None else 0.50
+                tp = top_p if top_p is not None else 0.82
+                rp = repetition_penalty if repetition_penalty is not None else 1.05
+                self.active_model._lock_rvq_timbre = True
                 if not ref_audio_path or not ref_text:
                     raise ValueError("Voice Lock / Clone mode requires selecting a saved character voice (reference audio + transcript).")
                 clean_ref_text, _ = sanitize_dialogue_for_model(ref_text, model_id="qwen3_clone")
@@ -729,16 +981,23 @@ class VoiceForgeEngine:
             audio_np = np.concatenate(chunks, axis=0) if len(chunks) > 1 else chunks[0]
             sr = self.active_model.sample_rate
             audio_np = apply_studio_pacing(audio_np, sr, speed=speed, trim_silence=trim_silence)
+            acoustics = analyze_voice_acoustics(audio_np, sr, clean_text)
             elapsed = time.perf_counter() - t0
             duration = audio_np.shape[0] / sr
             total_tokens = sum(r.token_count for r in results)
 
-            return audio_np, sr, {
+            out_metrics = {
                 "duration_sec": round(duration, 2),
                 "elapsed_sec": round(elapsed, 2),
                 "rtf": round(duration / elapsed, 2) if elapsed > 0 else 0,
                 "tokens": total_tokens,
                 "speed": round(speed, 2),
+                "temperature": round(temp, 2),
+                "top_p": round(tp, 2),
+                "seed": effective_seed,
+                "rvq_timbre_locked": bool(getattr(self.active_model, "_lock_rvq_timbre", False)),
                 "compiled_instruct": compiled_instruct,
                 "peak_memory_gb": round(mx.get_peak_memory() / 1e9, 2),
             }
+            out_metrics.update(acoustics)
+            return audio_np, sr, out_metrics
