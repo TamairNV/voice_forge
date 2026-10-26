@@ -1,0 +1,18 @@
+# Python & Virtualenv
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Generated audio takes & local runtime state (keep repo lightweight for GitHub)
+data/takes/*.wav
+data/characters/*.wav
+data/takes.json
+data/characters.json
+
+# macOS & IDE
+.DS_Store
+.vscode/
+.idea/
+*.log
