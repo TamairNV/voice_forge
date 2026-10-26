@@ -917,7 +917,18 @@
 
         <!-- Studio Form Panel -->
         <div class="studio-panel">
-          <div class="studio-top">
+          <!-- Mode Toggle: Single Line vs Multi-Character Scene Script -->
+          <div style="display: flex; gap: 6px; background: var(--bg-input); padding: 4px; border-radius: 10px; border: 1px solid var(--border); flex-shrink: 0;">
+            <button id="modeBtnSingle" class="tab-btn active" style="padding: 6px 10px; font-size: 11.5px;" onclick="switchEditorMode('single')">
+              🎙️ Single Voice / Line Studio
+            </button>
+            <button id="modeBtnScene" class="tab-btn" style="padding: 6px 10px; font-size: 11.5px;" onclick="switchEditorMode('scene')">
+              🎬 Multi-Character Scene & Script Stitcher (Auto-Creates / Reuses Cast)
+            </button>
+          </div>
+
+          <!-- SINGLE LINE MODE -->
+          <div class="studio-top" id="editorSingleMode">
             <div>
               <div class="section-label" style="margin-bottom: 5px;">
                 <span>Game Character Archetypes (One-Click Preset)</span>
@@ -974,6 +985,40 @@
             </div>
           </div>
 
+          <!-- MULTI-CHARACTER SCENE SCRIPT MODE -->
+          <div class="studio-top" id="editorSceneMode" style="display: none;">
+            <div style="display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 10px; flex-shrink: 0;">
+              <div class="field-group">
+                <div class="field-label"><span>Scene Title</span></div>
+                <input type="text" id="sceneTitleInput" value="Tavern Confrontation" placeholder="e.g., Tavern Confrontation" />
+              </div>
+              <div class="field-group">
+                <div class="field-label"><span>Turn Gap (ms)</span></div>
+                <input type="text" id="scenePauseInput" value="280" placeholder="280" />
+              </div>
+              <div class="field-group">
+                <div class="field-label"><span>Sample Scripts</span></div>
+                <button class="btn-sm emerald" style="height: 35px; justify-content: center;" onclick="loadDemoScript()">📜 Load Demo Game Scene</button>
+              </div>
+            </div>
+
+            <div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 9px; padding: 8px 11px; font-size: 11px; color: #c7d2fe; flex-shrink: 0;">
+              <strong>🎬 How Scene Scripts Work:</strong> Write one turn per line as <code>Name (voice description): Dialogue</code>.
+              If <code>Name</code> is already in your <strong>Character Voice Locker</strong>, it automatically reuses their locked voice! If they are new, it designs their voice on their first line and locks them into the roster for all following lines.
+            </div>
+
+            <div class="field-group grow">
+              <div class="field-label">
+                <span>Multi-Character Scene Script</span>
+                <span class="field-hint">Supports <code>[Pause: 600ms]</code> between lines &amp; Maya-1 tags like <code>&lt;laugh&gt;</code></span>
+              </div>
+              <textarea id="sceneScriptInput" style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;" placeholder="Torvin: Keep your coin, traveler. That blade was forged in the old fires.
+Nyx (sharp witty 28-year-old female rogue, crisp British accent, brisk pacing): Oh, come on Torvin! Everyone in this city has a price.
+[Pause: 450ms]
+Torvin: Not me, girl. Not for all the gold in the Citadel."></textarea>
+            </div>
+          </div>
+
           <div class="studio-footer">
             <div class="controls-grid">
               <div class="slider-box">
@@ -1014,7 +1059,7 @@
               </div>
             </div>
 
-            <button class="btn-generate" id="generateBtn" onclick="synthesizeSpeech()">
+            <button class="btn-generate" id="generateBtn" onclick="handlePrimaryAction()">
               <span id="generateBtnText">⚡ Generate Studio Voice (Qwen3-TTS VoiceDesign)</span>
             </button>
           </div>
@@ -1045,8 +1090,9 @@
         <!-- Library Panel -->
         <div class="library-panel">
           <div class="tabs-header">
-            <button class="tab-btn active" id="tabBtnTakes" onclick="switchTab('takes')">🎙️ Generated Takes (<span id="takesCount">0</span>)</button>
-            <button class="tab-btn" id="tabBtnChars" onclick="switchTab('chars')">🔒 Character Voice Locker (<span id="charsCount">0</span>)</button>
+            <button class="tab-btn active" id="tabBtnTakes" onclick="switchTab('takes')">🎙️ Takes (<span id="takesCount">0</span>)</button>
+            <button class="tab-btn" id="tabBtnChars" onclick="switchTab('chars')">🔒 Characters (<span id="charsCount">0</span>)</button>
+            <button class="tab-btn" id="tabBtnScenes" onclick="switchTab('scenes')">🎬 Stitched Scenes (<span id="scenesCount">0</span>)</button>
           </div>
 
           <div class="tab-view" id="viewTakes">
@@ -1055,9 +1101,13 @@
 
           <div class="tab-view" id="viewChars" style="display: none;">
             <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.28); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; font-size: 11px; color: #a7f3d0; flex-shrink: 0;">
-              <strong>💡 Zero-Drift Game Workflow:</strong> Design a voice with <strong>Qwen3</strong> or <strong>Maya-1</strong>, click <strong>"🔒 Lock as Character"</strong> on your favorite take, then click <strong>"Speak New Lines"</strong> to generate consistent dialogue!
+              <strong>💡 Zero-Drift Game Workflow:</strong> Characters locked here are automatically reused by name whenever you or an LLM renders a <strong>Multi-Character Scene Script</strong>!
             </div>
             <div class="list-stack" id="charsList"></div>
+          </div>
+
+          <div class="tab-view" id="viewScenes" style="display: none;">
+            <div class="list-stack" id="scenesList"></div>
           </div>
         </div>
       </div>
@@ -1090,6 +1140,7 @@
 
   <script>
     let state = {
+      editorMode: 'single',
       selectedModelId: 'qwen3_voicedesign',
       activeEngineModelId: null,
       swappingToModelId: null,
@@ -1097,6 +1148,7 @@
       presets: [],
       characters: [],
       takes: [],
+      scenes: [],
       mayaTags: [],
       lastTake: null,
       lockingTakeId: null,
@@ -1118,6 +1170,7 @@
         state.presets = data.presets || [];
         state.characters = data.characters || [];
         state.takes = data.takes || [];
+        state.scenes = data.scenes || [];
         state.mayaTags = data.maya1_tags || [];
 
         if (state.activeEngineModelId) {
@@ -1129,6 +1182,7 @@
         renderMayaTags();
         renderTakes();
         renderCharacters();
+        renderScenes();
         updateModelCardsUI();
 
         if (state.takes.length > 0 && !state.lastTake) {
@@ -1197,7 +1251,10 @@
       const btnText = document.getElementById('generateBtnText');
       btn.classList.remove('maya-mode', 'clone-mode');
 
-      if (isMaya) {
+      if (state.editorMode === 'scene') {
+        btn.classList.add('clone-mode');
+        btnText.textContent = '🎬 Render & Stitch Multi-Character Scene (Auto-Creates / Reuses Cast)';
+      } else if (isMaya) {
         btn.classList.add('maya-mode');
         btnText.textContent = '🎭 Generate Expressive Voice with Maya-1 (3.3B MLX)';
       } else if (isClone) {
@@ -1205,6 +1262,163 @@
         btnText.textContent = '🔒 Generate Locked NPC Voice with Qwen3 Base (bf16)';
       } else {
         btnText.textContent = '⚡ Generate Studio Voice with Qwen3 VoiceDesign (bf16)';
+      }
+    }
+
+    function switchEditorMode(mode) {
+      state.editorMode = mode;
+      const isSingle = mode === 'single';
+      document.getElementById('editorSingleMode').style.display = isSingle ? 'flex' : 'none';
+      document.getElementById('editorSceneMode').style.display = isSingle ? 'none' : 'flex';
+      document.getElementById('modeBtnSingle').classList.toggle('active', isSingle);
+      document.getElementById('modeBtnScene').classList.toggle('active', !isSingle);
+      if (!isSingle && !document.getElementById('sceneScriptInput').value.trim()) {
+        loadDemoScript();
+      }
+      updateModelCardsUI();
+    }
+
+    function loadDemoScript() {
+      document.getElementById('sceneTitleInput').value = 'Blacksmith Shop Confrontation';
+      document.getElementById('sceneScriptInput').value = [
+        'Torvin: Keep your coin, traveler. That blade was forged in the old fires, and nothing in these mountains is for sale anymore.',
+        'Nyx (A sharp, witty 28-year-old female rogue with a sleek British accent, confident and sarcastic tone, brisk conversational pacing): Oh, come on Torvin! Everyone in this city has a price, even a stubborn old dwarf.',
+        '[Pause: 350ms]',
+        'Torvin: You think a bag of stolen silver buys steel like this? Get out of my forge before I call the iron guard.',
+        'Nyx: Relax, old man. Keep the sword, I only came for the map hidden under your anvil.'
+      ].join('\n');
+      showToast('Loaded multi-character demo script (Torvin is reused from locker, Nyx will be created & locked!)');
+    }
+
+    function handlePrimaryAction() {
+      if (state.editorMode === 'scene') {
+        renderSceneScript();
+      } else {
+        synthesizeSpeech();
+      }
+    }
+
+    async function renderSceneScript() {
+      const title = document.getElementById('sceneTitleInput').value.trim() || 'Game Scene';
+      const script_text = document.getElementById('sceneScriptInput').value.trim();
+      const default_pause_ms = parseInt(document.getElementById('scenePauseInput').value || '280', 10);
+      const speed = parseFloat(document.getElementById('speedSlider').value);
+      const trim_silence = document.getElementById('trimSilenceCheck').checked;
+
+      if (!script_text) {
+        showToast('Please enter a multi-character script first!');
+        return;
+      }
+
+      const btn = document.getElementById('generateBtn');
+      const btnText = document.getElementById('generateBtnText');
+      btn.disabled = true;
+      btnText.textContent = '🎬 Directing Cast, Synthesizing Segments & Stitching Scene...';
+      document.getElementById('statusDot').className = 'dot loading';
+      document.getElementById('statusText').textContent = 'Rendering multi-character scene...';
+
+      try {
+        const res = await fetch('/api/scenes/render', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title,
+            script_text,
+            default_pause_ms,
+            speed,
+            trim_silence,
+            auto_lock_new_characters: true,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || 'Scene render failed');
+        }
+
+        state.scenes.unshift(data.scene);
+        if (data.characters) state.characters = data.characters;
+        if (data.takes) state.takes = data.takes;
+        if (data.status) {
+          state.activeEngineModelId = data.status.active_model_id;
+          updateStatusHeader(data.status);
+        }
+
+        renderCharacters();
+        renderTakes();
+        renderScenes();
+        switchTab('scenes');
+        loadSceneIntoMonitor(data.scene, true);
+        showToast(`🎬 Stitched ${data.scene.line_count} lines (${data.scene.duration_sec}s) in ${data.scene.elapsed_sec}s!`);
+      } catch (err) {
+        showToast(`Scene Error: ${err.message}`);
+        document.getElementById('statusDot').className = 'dot';
+        document.getElementById('statusText').textContent = 'Ready';
+      } finally {
+        btn.disabled = false;
+        updateModelCardsUI();
+      }
+    }
+
+    function loadSceneIntoMonitor(scene, autoPlay = false) {
+      const player = document.getElementById('mainAudioPlayer');
+      player.src = scene.url;
+      if (autoPlay) {
+        player.play().catch(() => {});
+      }
+      document.getElementById('activeTakeModel').textContent = `🎬 Scene: ${scene.title}`;
+      document.getElementById('activeTakeMetrics').innerHTML = `
+        <span class="metric-chip">Scene Len: <strong>${scene.duration_sec}s</strong></span>
+        <span class="metric-chip">Lines: <strong>${scene.line_count}</strong></span>
+        <span class="metric-chip">Render: <strong>${scene.elapsed_sec}s</strong></span>
+      `;
+      document.getElementById('activeTakeActions').style.display = 'flex';
+      const dl = document.getElementById('activeDownloadLink');
+      dl.href = scene.url;
+      dl.download = scene.filename;
+      drawWaveformFromUrl(scene.url);
+    }
+
+    function renderScenes() {
+      const countEl = document.getElementById('scenesCount');
+      if (countEl) countEl.textContent = state.scenes.length;
+      const list = document.getElementById('scenesList');
+      if (!list) return;
+
+      if (state.scenes.length === 0) {
+        list.innerHTML = `<div style="color: var(--text-dim); font-size: 12px; text-align: center; padding: 20px;">No stitched scenes yet. Click "🎬 Multi-Character Scene" on the left to render a full script!</div>`;
+        return;
+      }
+
+      list.innerHTML = state.scenes.map(sc => `
+        <div class="item-card">
+          <div class="item-header">
+            <span class="item-title">🎬 ${escapeHtml(sc.title)}</span>
+            <span style="font-size: 10.5px; color: var(--text-dim);">${sc.line_count} lines • ${sc.duration_sec}s</span>
+          </div>
+          <div class="item-sub" style="margin-bottom: 6px;">
+            ${(sc.segments || []).map(seg => `<div><strong>${escapeHtml(seg.speaker)}</strong> (${seg.start_sec}s–${seg.end_sec}s): "${escapeHtml(seg.text)}"</div>`).join('')}
+          </div>
+          <audio controls preload="none" src="${sc.url}"></audio>
+          <div class="item-actions">
+            <button class="btn-sm" onclick='loadSceneById(${JSON.stringify(sc.id)})'>▶ Play in Monitor</button>
+            <a class="btn-sm emerald" href="${sc.url}" download="${sc.filename}">⬇ Master Scene WAV</a>
+            <button class="btn-sm danger" onclick='deleteScene(${JSON.stringify(sc.id)})'>✕</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function loadSceneById(sceneId) {
+      const sc = state.scenes.find(x => x.id === sceneId);
+      if (sc) loadSceneIntoMonitor(sc, true);
+    }
+
+    async function deleteScene(sceneId) {
+      const res = await fetch(`/api/scenes/${sceneId}`, { method: 'DELETE' });
+      if (res.ok) {
+        const data = await res.json();
+        state.scenes = data.scenes;
+        renderScenes();
       }
     }
 
@@ -1625,11 +1839,12 @@
     }
 
     function switchTab(tab) {
-      const isTakes = tab === 'takes';
-      document.getElementById('viewTakes').style.display = isTakes ? 'flex' : 'none';
-      document.getElementById('viewChars').style.display = isTakes ? 'none' : 'flex';
-      document.getElementById('tabBtnTakes').classList.toggle('active', isTakes);
-      document.getElementById('tabBtnChars').classList.toggle('active', !isTakes);
+      document.getElementById('viewTakes').style.display = tab === 'takes' ? 'flex' : 'none';
+      document.getElementById('viewChars').style.display = tab === 'chars' ? 'flex' : 'none';
+      document.getElementById('viewScenes').style.display = tab === 'scenes' ? 'flex' : 'none';
+      document.getElementById('tabBtnTakes').classList.toggle('active', tab === 'takes');
+      document.getElementById('tabBtnChars').classList.toggle('active', tab === 'chars');
+      document.getElementById('tabBtnScenes').classList.toggle('active', tab === 'scenes');
     }
 
     function escapeHtml(str) {
@@ -1641,7 +1856,7 @@
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         e.preventDefault();
         const btn = document.getElementById('generateBtn');
-        if (!btn.disabled) synthesizeSpeech();
+        if (!btn.disabled) handlePrimaryAction();
       }
     });
 

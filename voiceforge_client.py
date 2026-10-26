@@ -119,6 +119,58 @@ class VoiceForgeClient:
             self.download_take(res["take"]["url"], output_wav)
         return res["take"]
 
+    def render_scene(
+        self,
+        title: str = "Game Cutscene",
+        script_text: Optional[str] = None,
+        lines: Optional[List[Dict[str, Any]]] = None,
+        cast: Optional[Dict[str, str]] = None,
+        default_pause_ms: int = 280,
+        speed: float = 1.15,
+        trim_silence: bool = True,
+        auto_lock_new_characters: bool = True,
+        output_wav: Optional[Union[str, Path]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Render a multi-character script into a stitched 24kHz `.wav` scene:
+        - Automatically reuses existing locked characters by name (`qwen3_clone`).
+        - Automatically designs & locks brand-new characters when first encountered (`auto_lock_new_characters=True`).
+        - Synthesizes each line and stitches them together with `default_pause_ms` (or per-line `pause_after_ms`).
+        """
+        payload = {
+            "title": title,
+            "cast": cast or {},
+            "lines": lines or [],
+            "script_text": script_text,
+            "default_pause_ms": default_pause_ms,
+            "speed": speed,
+            "trim_silence": trim_silence,
+            "auto_lock_new_characters": auto_lock_new_characters,
+        }
+        res = self._request_json("POST", "/api/scenes/render", payload)
+        scene = res["scene"]
+        if output_wav:
+            self.download_take(scene["url"], output_wav)
+        return scene
+
+    def stitch_takes(
+        self,
+        take_ids: List[str],
+        title: str = "Stitched Scene",
+        pause_ms: int = 280,
+        output_wav: Optional[Union[str, Path]] = None,
+    ) -> Dict[str, Any]:
+        """Stitch a list of existing `take_ids` into a single combined `.wav` scene."""
+        res = self._request_json(
+            "POST",
+            "/api/scenes/stitch",
+            {"title": title, "take_ids": take_ids, "pause_ms": pause_ms},
+        )
+        scene = res["scene"]
+        if output_wav:
+            self.download_take(scene["url"], output_wav)
+        return scene
+
     def download_take(self, take_url: str, dest_path: Union[str, Path]) -> Path:
         """Download a generated take's WAV file to a custom path."""
         url = f"{self.base_url}{take_url}" if take_url.startswith("/") else take_url

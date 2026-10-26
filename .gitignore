@@ -8,8 +8,10 @@ __pycache__/
 # Generated audio takes & local runtime state (keep repo lightweight for GitHub)
 data/takes/*.wav
 data/characters/*.wav
+data/scenes/*.wav
 data/takes.json
 data/characters.json
+data/scenes.json
 
 # macOS & IDE
 .DS_Store

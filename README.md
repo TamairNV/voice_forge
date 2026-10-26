@@ -65,6 +65,11 @@ Every single feature in VoiceForge Studio is accessible over HTTP JSON or direct
 | `POST` | `/api/characters/from-take` | Lock an existing `take_id` into the Character Voice Locker. |
 | `POST` | `/api/characters/upload` | Upload an external `.wav` file + transcript (`multipart/form-data`) to create a locked character. |
 | `DELETE` | `/api/characters/{char_id}` | Delete a locked character. |
+| `POST` | `/api/scenes/render` | **Multi-Character Scene Director**: Takes a script (`script_text` or `lines` + `cast`), reuses existing characters by name or creates/locks new ones, generates every segment, and stitches them into a single master `.wav` scene with timeline timestamps. |
+| `POST` | `/api/scenes/render/wav` | Same as `/api/scenes/render`, returning the stitched master 24kHz `.wav` binary file directly. |
+| `POST` | `/api/scenes/stitch` | Stitch an ordered list of existing `take_ids` into a combined `.wav` scene. |
+| `GET` | `/api/scenes` | List all stitched multi-character scenes. |
+| `DELETE` | `/api/scenes/{scene_id}` | Delete a stitched scene. |
 | `GET` | `/api/takes` | List recent generated audio takes. |
 | `DELETE` | `/api/takes/{take_id}` | Delete a generated take. |
 
@@ -195,3 +200,45 @@ curl -X POST http://127.0.0.1:7860/v1/audio/speech \
   }' --output speech.wav
 ```
 *(If `voice` matches a saved character name/ID, it automatically clones that character; otherwise it uses `instructions` or `voice` as a natural-language voice description!)*
+
+---
+
+### Example 6: Multi-Character Scene & Script Stitcher (`POST /api/scenes/render`)
+
+You (or another LLM) can pass an entire multi-character game script in a single API call.
+- **Reuses Existing Characters**: If a speaker name (e.g., `"Torvin"`) already exists in your Character Voice Locker, it automatically uses `qwen3_clone` with their locked voice so they sound 100% identical across every scene.
+- **Auto-Creates & Locks New Characters**: If a speaker name (e.g., `"Nyx"`) is new, it generates their voice from their description on their first line, locks them into your Character Voice Locker (`auto_lock_new_characters: true`), and reuses that exact voice for all of their subsequent lines in the scene and future scenes!
+- **Stitches Master Scene + Individual Takes**: Concatenates all segments with configurable turn-taking silence (`default_pause_ms` or per-line `pause_after_ms`) into a single master 24kHz `.wav` scene and returns start/end timestamps for subtitles.
+
+#### Option A: Plain-Text Script (`script_text`)
+```bash
+curl -X POST http://127.0.0.1:7860/api/scenes/render \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Blacksmith Confrontation",
+    "default_pause_ms": 280,
+    "speed": 1.15,
+    "script_text": "Torvin: Keep your coin, traveler. That blade was forged in the old fires.\nNyx (A sharp, witty 28-year-old female rogue with a sleek British accent, confident and sarcastic tone, brisk pacing): Oh, come on Torvin! Everyone in this city has a price.\n[Pause: 400ms]\nTorvin: Not me, girl. Get out of my forge.\nNyx: Fine, keep the sword. I only came for the map."
+  }'
+```
+
+#### Option B: Structured JSON (`cast` + `lines`)
+```bash
+curl -X POST http://127.0.0.1:7860/api/scenes/render \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Bridge Ambush",
+    "default_pause_ms": 250,
+    "speed": 1.15,
+    "cast": {
+      "Nyx": "A sharp, witty 28-year-old female rogue with a sleek British accent, confident and sarcastic tone, brisk pacing.",
+      "Captain Vane": "A battle-hardened 45-year-old male guard captain, deep authoritative American baritone, brisk tactical pacing."
+    },
+    "lines": [
+      {"speaker": "Captain Vane", "text": "Halt! Nobody crosses the upper bridge tonight.", "pause_after_ms": 300},
+      {"speaker": "Nyx", "text": "Good thing I was planning on taking the rooftops then."},
+      {"speaker": "Captain Vane", "text": "Archers, lock onto her now!"}
+    ]
+  }'
+```
+*(Want the stitched `.wav` file returned directly as binary audio? Send the exact same payload to `POST /api/scenes/render/wav` with `--output scene.wav`!)*
