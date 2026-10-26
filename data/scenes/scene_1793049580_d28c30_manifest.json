@@ -1,0 +1,33 @@
+{
+  "scene_id": "scene_1793049580_d28c30",
+  "title": "b",
+  "sample_rate": 24000,
+  "duration_sec": 4.99,
+  "line_count": 1,
+  "master_audio_file": "scene_1793049580_d28c30.wav",
+  "subtitles_file": "scene_1793049580_d28c30.srt",
+  "cast": [
+    {
+      "speaker": "Dave M",
+      "character_id": "char_1793049478_25f5b",
+      "status": "reused_locked_character",
+      "description": "Male university student, 19 years old, bright slightly higher-pitched voice, tired and exasperated, strong Mancunian northern English accent, tired, flat."
+    }
+  ],
+  "dialogue_lines": [
+    {
+      "index": 1,
+      "speaker": "Dave M",
+      "character_id": "char_1793049478_25f5b",
+      "text": "<sarcastic> He just placed two wooden sticks on a cardboard hexagon, Mark. Just roll.",
+      "clean_subtitle_text": "He just placed two wooden sticks on a cardboard hexagon, Mark. Just roll.",
+      "start_sec": 0.0,
+      "end_sec": 4.99,
+      "duration_sec": 4.99,
+      "pause_after_ms": 0,
+      "stem_file": "lines/001_dave_m.wav",
+      "take_id": "take_1793049580_796d8f",
+      "take_url": "/audio/takes/take_1793049580_796d8f.wav"
+    }
+  ]
+}

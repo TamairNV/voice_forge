@@ -1,0 +1,103 @@
+{
+  "scene_id": "scene_1793050814_ed3524",
+  "title": "side_hustle_milk_1 (Original Script - Locked Karen)",
+  "sample_rate": 24000,
+  "duration_sec": 23.06,
+  "line_count": 6,
+  "master_audio_file": "scene_1793050814_ed3524.wav",
+  "subtitles_file": "scene_1793050814_ed3524.srt",
+  "cast": [
+    {
+      "speaker": "Chloe (Entitled 20s Karen)",
+      "character_id": "char_1793050802_16867",
+      "status": "reused_locked_character",
+      "description": "An ultra-entitled, bratty, self-important 25-year-old female Karen and delusional influencer stereotype with a sharp posh-tryhard British accent, medium-high slightly nasal pitch, crisp expressive vocal texture, snappy condescending cadence, dramatic defensive and judgmental attitude, close-mic studio game dialogue."
+    }
+  ],
+  "dialogue_lines": [
+    {
+      "index": 1,
+      "speaker": "Chloe (Entitled 20s Karen)",
+      "character_id": "char_1793050802_16867",
+      "text": "Don't worry, I found a new side hustle.",
+      "clean_subtitle_text": "Don't worry, I found a new side hustle.",
+      "start_sec": 0.0,
+      "end_sec": 3.04,
+      "duration_sec": 3.04,
+      "pause_after_ms": 1500,
+      "stem_file": "lines/001_chloe__entitled_20s_karen_.wav",
+      "take_id": "take_1793050805_d44582",
+      "take_url": "/audio/takes/take_1793050805_d44582.wav"
+    },
+    {
+      "index": 2,
+      "speaker": "Chloe (Entitled 20s Karen)",
+      "character_id": "char_1793050802_16867",
+      "text": "I found out I can sell my breast milk.",
+      "clean_subtitle_text": "I found out I can sell my breast milk.",
+      "start_sec": 4.54,
+      "end_sec": 6.94,
+      "duration_sec": 2.4,
+      "pause_after_ms": 2500,
+      "stem_file": "lines/002_chloe__entitled_20s_karen_.wav",
+      "take_id": "take_1793050808_555e53",
+      "take_url": "/audio/takes/take_1793050808_555e53.wav"
+    },
+    {
+      "index": 3,
+      "speaker": "Chloe (Entitled 20s Karen)",
+      "character_id": "char_1793050802_16867",
+      "text": "No, this isn't like last time!",
+      "clean_subtitle_text": "No, this isn't like last time!",
+      "start_sec": 9.44,
+      "end_sec": 11.6,
+      "duration_sec": 2.16,
+      "pause_after_ms": 2000,
+      "stem_file": "lines/003_chloe__entitled_20s_karen_.wav",
+      "take_id": "take_1793050809_19bee5",
+      "take_url": "/audio/takes/take_1793050809_19bee5.wav"
+    },
+    {
+      "index": 4,
+      "speaker": "Chloe (Entitled 20s Karen)",
+      "character_id": "char_1793050802_16867",
+      "text": "Behind a Tesco, but he's legit.",
+      "clean_subtitle_text": "Behind a Tesco, but he's legit.",
+      "start_sec": 13.6,
+      "end_sec": 16.08,
+      "duration_sec": 2.48,
+      "pause_after_ms": 300,
+      "stem_file": "lines/004_chloe__entitled_20s_karen_.wav",
+      "take_id": "take_1793050811_74b253",
+      "take_url": "/audio/takes/take_1793050811_74b253.wav"
+    },
+    {
+      "index": 5,
+      "speaker": "Chloe (Entitled 20s Karen)",
+      "character_id": "char_1793050802_16867",
+      "text": "He had a business card.",
+      "clean_subtitle_text": "He had a business card.",
+      "start_sec": 16.38,
+      "end_sec": 17.98,
+      "duration_sec": 1.6,
+      "pause_after_ms": 3000,
+      "stem_file": "lines/005_chloe__entitled_20s_karen_.wav",
+      "take_id": "take_1793050813_abceca",
+      "take_url": "/audio/takes/take_1793050813_abceca.wav"
+    },
+    {
+      "index": 6,
+      "speaker": "Chloe (Entitled 20s Karen)",
+      "character_id": "char_1793050802_16867",
+      "text": "You just don't want me to succeed!",
+      "clean_subtitle_text": "You just don't want me to succeed!",
+      "start_sec": 20.98,
+      "end_sec": 23.06,
+      "duration_sec": 2.08,
+      "pause_after_ms": 0,
+      "stem_file": "lines/006_chloe__entitled_20s_karen_.wav",
+      "take_id": "take_1793050814_f51aa7",
+      "take_url": "/audio/takes/take_1793050814_f51aa7.wav"
+    }
+  ]
+}

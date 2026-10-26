@@ -1,0 +1,33 @@
+{
+  "scene_id": "scene_1793049610_ca8ec2",
+  "title": "b",
+  "sample_rate": 24000,
+  "duration_sec": 3.05,
+  "line_count": 1,
+  "master_audio_file": "scene_1793049610_ca8ec2.wav",
+  "subtitles_file": "scene_1793049610_ca8ec2.srt",
+  "cast": [
+    {
+      "speaker": "Dave M",
+      "character_id": "char_1793049478_25f5b",
+      "status": "reused_locked_character",
+      "description": "Male university student, 19 years old, bright slightly higher-pitched voice, tired and exasperated, strong Mancunian northern English accent, tired, flat."
+    }
+  ],
+  "dialogue_lines": [
+    {
+      "index": 1,
+      "speaker": "Dave M",
+      "character_id": "char_1793049478_25f5b",
+      "text": "<angry> It's a block of painted pine! Stop looking at him like that!",
+      "clean_subtitle_text": "It's a block of painted pine! Stop looking at him like that!",
+      "start_sec": 0.0,
+      "end_sec": 3.05,
+      "duration_sec": 3.05,
+      "pause_after_ms": 0,
+      "stem_file": "lines/001_dave_m.wav",
+      "take_id": "take_1793049610_7c6474",
+      "take_url": "/audio/takes/take_1793049610_7c6474.wav"
+    }
+  ]
+}

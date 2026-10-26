@@ -1,0 +1,103 @@
+{
+  "scene_id": "scene_1793051269_98cd19",
+  "title": "side_hustle_milk_1 (Improved Comedy Script - Locked Qwen3)",
+  "sample_rate": 24000,
+  "duration_sec": 42.23,
+  "line_count": 6,
+  "master_audio_file": "scene_1793051269_98cd19.wav",
+  "subtitles_file": "scene_1793051269_98cd19.srt",
+  "cast": [
+    {
+      "speaker": "Chloe (Entitled 20s Karen)",
+      "character_id": "char_1793051236_f9c20",
+      "status": "reused_locked_character",
+      "description": "An ultra-entitled, bratty, self-important 25-year-old female Karen and delusional influencer stereotype with a sharp posh-tryhard British accent, medium-high slightly nasal pitch, crisp expressive vocal texture, snappy condescending cadence, dramatic defensive and judgmental attitude, close-mic studio game dialogue."
+    }
+  ],
+  "dialogue_lines": [
+    {
+      "index": 1,
+      "speaker": "Chloe (Entitled 20s Karen)",
+      "character_id": "char_1793051236_f9c20",
+      "text": "Babe, stop lecturing me about rent, okay? I literally just unlocked a passive income stream.",
+      "clean_subtitle_text": "Babe, stop lecturing me about rent, okay? I literally just unlocked a passive income stream.",
+      "start_sec": 0.0,
+      "end_sec": 7.12,
+      "duration_sec": 7.12,
+      "pause_after_ms": 1500,
+      "stem_file": "lines/001_chloe__entitled_20s_karen_.wav",
+      "take_id": "take_1793051252_b38d78",
+      "take_url": "/audio/takes/take_1793051252_b38d78.wav"
+    },
+    {
+      "index": 2,
+      "speaker": "Chloe (Entitled 20s Karen)",
+      "character_id": "char_1793051236_f9c20",
+      "text": "Liquid gold, hun. I'm selling my breast milk to bodybuilders.",
+      "clean_subtitle_text": "Liquid gold, hun. I'm selling my breast milk to bodybuilders.",
+      "start_sec": 8.62,
+      "end_sec": 12.94,
+      "duration_sec": 4.32,
+      "pause_after_ms": 2500,
+      "stem_file": "lines/002_chloe__entitled_20s_karen_.wav",
+      "take_id": "take_1793051256_32784b",
+      "take_url": "/audio/takes/take_1793051256_32784b.wav"
+    },
+    {
+      "index": 3,
+      "speaker": "Chloe (Entitled 20s Karen)",
+      "character_id": "char_1793051236_f9c20",
+      "text": "Excuse me?! No, this is nothing like the dog-breeding incident!",
+      "clean_subtitle_text": "Excuse me?! No, this is nothing like the dog-breeding incident!",
+      "start_sec": 15.44,
+      "end_sec": 19.84,
+      "duration_sec": 4.4,
+      "pause_after_ms": 2000,
+      "stem_file": "lines/003_chloe__entitled_20s_karen_.wav",
+      "take_id": "take_1793051259_463703",
+      "take_url": "/audio/takes/take_1793051259_463703.wav"
+    },
+    {
+      "index": 4,
+      "speaker": "Chloe (Entitled 20s Karen)",
+      "character_id": "char_1793051236_f9c20",
+      "text": "Okay, yes, we met behind the big Tesco by the recycling bins, but he is a serious investor!",
+      "clean_subtitle_text": "Okay, yes, we met behind the big Tesco by the recycling bins, but he is a serious investor!",
+      "start_sec": 21.84,
+      "end_sec": 27.84,
+      "duration_sec": 6.0,
+      "pause_after_ms": 350,
+      "stem_file": "lines/004_chloe__entitled_20s_karen_.wav",
+      "take_id": "take_1793051262_1a8b7a",
+      "take_url": "/audio/takes/take_1793051262_1a8b7a.wav"
+    },
+    {
+      "index": 5,
+      "speaker": "Chloe (Entitled 20s Karen)",
+      "character_id": "char_1793051236_f9c20",
+      "text": "He literally handed me a business card. It was laminated, Sharon. Laminated!",
+      "clean_subtitle_text": "He literally handed me a business card. It was laminated, Sharon. Laminated!",
+      "start_sec": 28.19,
+      "end_sec": 33.39,
+      "duration_sec": 5.2,
+      "pause_after_ms": 3000,
+      "stem_file": "lines/005_chloe__entitled_20s_karen_.wav",
+      "take_id": "take_1793051266_6e5dfa",
+      "take_url": "/audio/takes/take_1793051266_6e5dfa.wav"
+    },
+    {
+      "index": 6,
+      "speaker": "Chloe (Entitled 20s Karen)",
+      "character_id": "char_1793051236_f9c20",
+      "text": "Wow. Honestly, the toxic negativity from you right now? You just hate seeing a female founder win!",
+      "clean_subtitle_text": "Wow. Honestly, the toxic negativity from you right now? You just hate seeing a female founder win!",
+      "start_sec": 36.39,
+      "end_sec": 42.23,
+      "duration_sec": 5.84,
+      "pause_after_ms": 0,
+      "stem_file": "lines/006_chloe__entitled_20s_karen_.wav",
+      "take_id": "take_1793051269_b8e04c",
+      "take_url": "/audio/takes/take_1793051269_b8e04c.wav"
+    }
+  ]
+}

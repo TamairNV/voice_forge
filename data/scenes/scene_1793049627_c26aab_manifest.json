@@ -1,0 +1,33 @@
+{
+  "scene_id": "scene_1793049627_c26aab",
+  "title": "b",
+  "sample_rate": 24000,
+  "duration_sec": 4.37,
+  "line_count": 1,
+  "master_audio_file": "scene_1793049627_c26aab.wav",
+  "subtitles_file": "scene_1793049627_c26aab.srt",
+  "cast": [
+    {
+      "speaker": "Dave M",
+      "character_id": "char_1793049478_25f5b",
+      "status": "reused_locked_character",
+      "description": "Male university student, 19 years old, bright slightly higher-pitched voice, tired and exasperated, strong Mancunian northern English accent, tired, flat."
+    }
+  ],
+  "dialogue_lines": [
+    {
+      "index": 1,
+      "speaker": "Dave M",
+      "character_id": "char_1793049478_25f5b",
+      "text": "<exhale> Mark, I'm physically uncomfortable, and Bobby hasn't blinked in four minutes.",
+      "clean_subtitle_text": "Mark, I'm physically uncomfortable, and Bobby hasn't blinked in four minutes.",
+      "start_sec": 0.0,
+      "end_sec": 4.37,
+      "duration_sec": 4.37,
+      "pause_after_ms": 0,
+      "stem_file": "lines/001_dave_m.wav",
+      "take_id": "take_1793049627_2c193e",
+      "take_url": "/audio/takes/take_1793049627_2c193e.wav"
+    }
+  ]
+}

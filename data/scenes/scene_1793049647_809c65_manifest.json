@@ -1,0 +1,33 @@
+{
+  "scene_id": "scene_1793049647_809c65",
+  "title": "b",
+  "sample_rate": 24000,
+  "duration_sec": 4.0,
+  "line_count": 1,
+  "master_audio_file": "scene_1793049647_809c65.wav",
+  "subtitles_file": "scene_1793049647_809c65.srt",
+  "cast": [
+    {
+      "speaker": "Bobby M",
+      "character_id": "char_1793049487_fb5ea",
+      "status": "reused_locked_character",
+      "description": "Male university student, 19 years old, flat robotic monotone, mid-pitched nasal American voice, no emotion at all, monotone."
+    }
+  ],
+  "dialogue_lines": [
+    {
+      "index": 1,
+      "speaker": "Bobby M",
+      "character_id": "char_1793049487_fb5ea",
+      "text": "You disrupted my trade route. I am going to dock your victory points.",
+      "clean_subtitle_text": "You disrupted my trade route. I am going to dock your victory points.",
+      "start_sec": 0.0,
+      "end_sec": 4.0,
+      "duration_sec": 4.0,
+      "pause_after_ms": 0,
+      "stem_file": "lines/001_bobby_m.wav",
+      "take_id": "take_1793049647_e2f302",
+      "take_url": "/audio/takes/take_1793049647_e2f302.wav"
+    }
+  ]
+}

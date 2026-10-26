@@ -859,16 +859,27 @@ def _build_rolling_context_reference(
         p_wav = p_wav.mean(axis=1)
     p_text = prev_text.strip()
 
-    # Cap golden anchor to ~5.5s if combining with previous line so total ICL context stays in the 8-11s sweet spot
+    # ICL cloning needs ref audio and ref text to line up exactly. Cutting the audio while keeping the full
+    # transcript makes the model never find the end of the reference and spiral into runaway generation,
+    # so a previous line that is too long is skipped (golden anchor only) rather than truncated.
     max_p_samples = int(max_prev_sec * sample_rate)
     if p_wav.shape[0] > max_p_samples:
-        # Keep the trailing end of the previous line (most relevant to the transition into the next line)
-        p_wav = p_wav[-max_p_samples:]
+        return mx.array(g_wav, dtype=mx.float32), g_text, g_wav
 
     gap = np.zeros(int(0.14 * sample_rate), dtype=np.float32)
     combined_np = np.concatenate([g_wav, gap, p_wav], axis=0).astype(np.float32)
     combined_text = f"{g_text} {p_text}".strip()
     return mx.array(combined_np, dtype=mx.float32), combined_text, combined_np
+
+
+def _estimate_max_tokens(text: str, tokens_per_sec: float = 12.5) -> int:
+    """
+    Estimates a generous upper bound on codec tokens for `text` (~2.3 words/sec of speech, doubled, plus 2s margin)
+    so a spiralling generation is killed early instead of running to the model's default limit.
+    """
+    words = max(1, len(text.split()))
+    expected_sec = words / 2.3
+    return int((expected_sec * 2.0 + 2.0) * tokens_per_sec)
 
 
 def _derive_deterministic_seed(key_str: str) -> int:
@@ -989,7 +1000,10 @@ class VoiceForgeEngine:
                 prev_text=clean_prev_text,
                 sample_rate=24000,
             )
-            used_prev_context = bool(prev_audio_path and clean_prev_text and ref_audio_mx is not None)
+            used_prev_context = bool(
+                prev_audio_path and clean_prev_text and ref_audio_mx is not None
+                and combined_ref_text and combined_ref_text != clean_ref_text
+            )
 
             if info["family"] == "maya1":
                 temp = temperature if temperature is not None else 0.42
@@ -1048,17 +1062,36 @@ class VoiceForgeEngine:
                     raise ValueError("Voice Lock / Clone mode requires selecting a saved character voice (reference audio + transcript).")
                 effective_ref_audio = ref_audio_mx if ref_audio_mx is not None else ref_audio_path
                 effective_ref_text = combined_ref_text if combined_ref_text else clean_ref_text
-                results = list(
-                    self.active_model.generate(
-                        text=clean_text,
-                        ref_audio=effective_ref_audio,
-                        ref_text=effective_ref_text,
-                        lang_code=language,
-                        temperature=temp,
-                        top_p=tp,
-                        repetition_penalty=rp,
+                token_cap = _estimate_max_tokens(clean_text)
+                base_seed = effective_seed if effective_seed is not None else 1
+                # Attempts: chained context first (if any), a retry with a new seed, then the golden anchor alone.
+                attempts = [
+                    (effective_ref_audio, effective_ref_text, base_seed),
+                    (effective_ref_audio, effective_ref_text, base_seed + 1),
+                    (ref_audio_path, clean_ref_text, base_seed + 2),
+                ]
+                results = []
+                for attempt_idx, (a_audio, a_text, a_seed) in enumerate(attempts):
+                    mx.random.seed(int(a_seed))
+                    results = list(
+                        self.active_model.generate(
+                            text=clean_text,
+                            ref_audio=a_audio,
+                            ref_text=a_text,
+                            lang_code=language,
+                            temperature=temp,
+                            top_p=tp,
+                            repetition_penalty=rp,
+                            max_tokens=token_cap,
+                        )
                     )
-                )
+                    if not any(r.token_count >= token_cap for r in results):
+                        if attempt_idx == 2:
+                            used_prev_context = False
+                        break
+                    print(f"[voiceforge] runaway generation killed at {token_cap} tokens (attempt {attempt_idx + 1}/{len(attempts)}): {clean_text[:50]!r}", flush=True)
+                else:
+                    raise RuntimeError(f"Generation spiralled past the {token_cap}-token limit on every attempt: {clean_text[:60]!r}")
             else:
                 raise ValueError(f"Unsupported mode: {info['mode']}")
 

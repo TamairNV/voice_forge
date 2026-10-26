@@ -1,0 +1,33 @@
+{
+  "scene_id": "scene_1793049607_0907d5",
+  "title": "b",
+  "sample_rate": 24000,
+  "duration_sec": 9.76,
+  "line_count": 1,
+  "master_audio_file": "scene_1793049607_0907d5.wav",
+  "subtitles_file": "scene_1793049607_0907d5.srt",
+  "cast": [
+    {
+      "speaker": "Mark M",
+      "character_id": "char_1793049484_0e172",
+      "status": "reused_character_with_maya1",
+      "description": "Male university student, 19 years old, deep soft low voice, intense and breathy, posh southern English accent, hushed intimate whisper."
+    }
+  ],
+  "dialogue_lines": [
+    {
+      "index": 1,
+      "speaker": "Mark M",
+      "character_id": "char_1793049484_0e172",
+      "text": "<gasp> Oh, my god. The infrastructure. The urban density. It's so thick.",
+      "clean_subtitle_text": "Oh, my god. The infrastructure. The urban density. It's so thick.",
+      "start_sec": 0.0,
+      "end_sec": 9.76,
+      "duration_sec": 9.76,
+      "pause_after_ms": 0,
+      "stem_file": "lines/001_mark_m.wav",
+      "take_id": "take_1793049607_c90ff9",
+      "take_url": "/audio/takes/take_1793049607_c90ff9.wav"
+    }
+  ]
+}
