@@ -1,0 +1,103 @@
+{
+  "scene_id": "scene_1793045469_895f73",
+  "title": "side_hustle_milk_1 v3 (Maya-1 Essex Karen)",
+  "sample_rate": 24000,
+  "duration_sec": 36.93,
+  "line_count": 6,
+  "master_audio_file": "scene_1793045469_895f73.wav",
+  "subtitles_file": "scene_1793045469_895f73.srt",
+  "cast": [
+    {
+      "speaker": "Kayleigh_Maya",
+      "character_id": null,
+      "status": "designed_new_voice",
+      "description": "Smug MLM boss-babe Karen, Female voice in her late 20s with an Essex English accent, low-mid pitch, husky slightly raspy timbre, conversational pacing, casual smug tone at medium-high intensity."
+    }
+  ],
+  "dialogue_lines": [
+    {
+      "index": 1,
+      "speaker": "Kayleigh_Maya",
+      "character_id": null,
+      "text": "Right, don't panic, babe. I've found a new side hustle.",
+      "clean_subtitle_text": "Right, don't panic, babe. I've found a new side hustle.",
+      "start_sec": 0.0,
+      "end_sec": 2.85,
+      "duration_sec": 2.85,
+      "pause_after_ms": 1500,
+      "stem_file": "lines/001_kayleigh_maya.wav",
+      "take_id": "take_1793045415_cd6e12",
+      "take_url": "/audio/takes/take_1793045415_cd6e12.wav"
+    },
+    {
+      "index": 2,
+      "speaker": "Kayleigh_Maya",
+      "character_id": null,
+      "text": "Turns out you can sell your breast milk. <chuckle> They call it liquid gold. Look it up.",
+      "clean_subtitle_text": "Turns out you can sell your breast milk.  They call it liquid gold. Look it up.",
+      "start_sec": 4.35,
+      "end_sec": 9.21,
+      "duration_sec": 4.86,
+      "pause_after_ms": 2500,
+      "stem_file": "lines/002_kayleigh_maya.wav",
+      "take_id": "take_1793045427_c152a1",
+      "take_url": "/audio/takes/take_1793045427_c152a1.wav"
+    },
+    {
+      "index": 3,
+      "speaker": "Kayleigh_Maya",
+      "character_id": null,
+      "text": "<gasp> No. This is nothing like the Herbalife thing... or the crypto. That was different.",
+      "clean_subtitle_text": "No. This is nothing like the Herbalife thing... or the crypto. That was different.",
+      "start_sec": 11.71,
+      "end_sec": 16.11,
+      "duration_sec": 4.4,
+      "pause_after_ms": 2000,
+      "stem_file": "lines/003_kayleigh_maya.wav",
+      "take_id": "take_1793045438_c177b5",
+      "take_url": "/audio/takes/take_1793045438_c177b5.wav"
+    },
+    {
+      "index": 4,
+      "speaker": "Kayleigh_Maya",
+      "character_id": null,
+      "text": "<sigh> Yes, I met him behind the big Tesco... but he's legit. He's got a van.",
+      "clean_subtitle_text": "Yes, I met him behind the big Tesco... but he's legit. He's got a van.",
+      "start_sec": 18.11,
+      "end_sec": 23.85,
+      "duration_sec": 5.74,
+      "pause_after_ms": 300,
+      "stem_file": "lines/004_kayleigh_maya.wav",
+      "take_id": "take_1793045451_354642",
+      "take_url": "/audio/takes/take_1793045451_354642.wav"
+    },
+    {
+      "index": 5,
+      "speaker": "Kayleigh_Maya",
+      "character_id": null,
+      "text": "And he gave me a business card. With a QR code, Debbie. <excited> A QR code.",
+      "clean_subtitle_text": "And he gave me a business card. With a QR code, Debbie.  A QR code.",
+      "start_sec": 24.15,
+      "end_sec": 28.24,
+      "duration_sec": 4.09,
+      "pause_after_ms": 3000,
+      "stem_file": "lines/005_kayleigh_maya.wav",
+      "take_id": "take_1793045458_682f9d",
+      "take_url": "/audio/takes/take_1793045458_682f9d.wav"
+    },
+    {
+      "index": 6,
+      "speaker": "Kayleigh_Maya",
+      "character_id": null,
+      "text": "<angry> Wow. You know what? You've always been jealous. You just don't want me to succeed.",
+      "clean_subtitle_text": "Wow. You know what? You've always been jealous. You just don't want me to succeed.",
+      "start_sec": 31.24,
+      "end_sec": 36.93,
+      "duration_sec": 5.7,
+      "pause_after_ms": 0,
+      "stem_file": "lines/006_kayleigh_maya.wav",
+      "take_id": "take_1793045469_49d98d",
+      "take_url": "/audio/takes/take_1793045469_49d98d.wav"
+    }
+  ]
+}

@@ -1,0 +1,103 @@
+{
+  "scene_id": "scene_1793045745_35ad3f",
+  "title": "side_hustle_milk_1 v4 (Maya-1)",
+  "sample_rate": 24000,
+  "duration_sec": 40.15,
+  "line_count": 6,
+  "master_audio_file": "scene_1793045745_35ad3f.wav",
+  "subtitles_file": "scene_1793045745_35ad3f.srt",
+  "cast": [
+    {
+      "speaker": "Kayleigh_Maya",
+      "character_id": null,
+      "status": "designed_new_voice",
+      "description": "Loud entitled phone-talker, Female voice in her mid-20s with an Essex English accent, low-mid pitch with heavy vocal fry, nasal bratty timbre, casual and breezy, relaxed pacing, lazy vocal fry at the ends of phrases tone at high intensity."
+    }
+  ],
+  "dialogue_lines": [
+    {
+      "index": 1,
+      "speaker": "Kayleigh_Maya",
+      "character_id": null,
+      "text": "Right, don't panic, babe. I've found a new side hustle.",
+      "clean_subtitle_text": "Right, don't panic, babe. I've found a new side hustle.",
+      "start_sec": 0.0,
+      "end_sec": 3.84,
+      "duration_sec": 3.84,
+      "pause_after_ms": 1500,
+      "stem_file": "lines/001_kayleigh_maya.wav",
+      "take_id": "take_1793045689_ac69ab",
+      "take_url": "/audio/takes/take_1793045689_ac69ab.wav"
+    },
+    {
+      "index": 2,
+      "speaker": "Kayleigh_Maya",
+      "character_id": null,
+      "text": "Turns out you can sell your breast milk. They call it liquid gold. Look it up.",
+      "clean_subtitle_text": "Turns out you can sell your breast milk. They call it liquid gold. Look it up.",
+      "start_sec": 5.34,
+      "end_sec": 10.13,
+      "duration_sec": 4.79,
+      "pause_after_ms": 2500,
+      "stem_file": "lines/002_kayleigh_maya.wav",
+      "take_id": "take_1793045699_f5e509",
+      "take_url": "/audio/takes/take_1793045699_f5e509.wav"
+    },
+    {
+      "index": 3,
+      "speaker": "Kayleigh_Maya",
+      "character_id": null,
+      "text": "<gasp> No. No! This is nothing like the Herbalife thing... or the crypto. That was different!",
+      "clean_subtitle_text": "No. No! This is nothing like the Herbalife thing... or the crypto. That was different!",
+      "start_sec": 12.63,
+      "end_sec": 19.15,
+      "duration_sec": 6.52,
+      "pause_after_ms": 2000,
+      "stem_file": "lines/003_kayleigh_maya.wav",
+      "take_id": "take_1793045712_09a78c",
+      "take_url": "/audio/takes/take_1793045712_09a78c.wav"
+    },
+    {
+      "index": 4,
+      "speaker": "Kayleigh_Maya",
+      "character_id": null,
+      "text": "<sigh> Yes, I met him behind the big Tesco... but he's legit. He's got a van.",
+      "clean_subtitle_text": "Yes, I met him behind the big Tesco... but he's legit. He's got a van.",
+      "start_sec": 21.15,
+      "end_sec": 26.08,
+      "duration_sec": 4.94,
+      "pause_after_ms": 300,
+      "stem_file": "lines/004_kayleigh_maya.wav",
+      "take_id": "take_1793045724_36e09a",
+      "take_url": "/audio/takes/take_1793045724_36e09a.wav"
+    },
+    {
+      "index": 5,
+      "speaker": "Kayleigh_Maya",
+      "character_id": null,
+      "text": "And he gave me a business card. <chuckle> With a QR code, Debbie. A QR code.",
+      "clean_subtitle_text": "And he gave me a business card.  With a QR code, Debbie. A QR code.",
+      "start_sec": 26.38,
+      "end_sec": 31.89,
+      "duration_sec": 5.51,
+      "pause_after_ms": 3000,
+      "stem_file": "lines/005_kayleigh_maya.wav",
+      "take_id": "take_1793045734_60749a",
+      "take_url": "/audio/takes/take_1793045734_60749a.wav"
+    },
+    {
+      "index": 6,
+      "speaker": "Kayleigh_Maya",
+      "character_id": null,
+      "text": "<sigh> Wow. You know what? You've always been jealous. <angry> You just don't want me to succeed!",
+      "clean_subtitle_text": "Wow. You know what? You've always been jealous.  You just don't want me to succeed!",
+      "start_sec": 34.89,
+      "end_sec": 40.15,
+      "duration_sec": 5.26,
+      "pause_after_ms": 0,
+      "stem_file": "lines/006_kayleigh_maya.wav",
+      "take_id": "take_1793045745_7fbba1",
+      "take_url": "/audio/takes/take_1793045745_7fbba1.wav"
+    }
+  ]
+}

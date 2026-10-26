@@ -1,0 +1,67 @@
+{
+  "scene_id": "scene_1793043278_5b86ed",
+  "title": "Vault Laser Grid Interruption",
+  "sample_rate": 24000,
+  "duration_sec": 9.5,
+  "line_count": 3,
+  "master_audio_file": "scene_1793043278_5b86ed.wav",
+  "subtitles_file": "scene_1793043278_5b86ed.srt",
+  "cast": [
+    {
+      "speaker": "Nyx",
+      "character_id": "char_1793042558_12e8f",
+      "status": "reused_locked_character",
+      "description": "A sharp, witty 28-year-old female rogue with a sleek British accent, confident and sarcastic tone, brisk pacing"
+    },
+    {
+      "speaker": "Torvin",
+      "character_id": "char_torvin",
+      "status": "reused_locked_character",
+      "description": "An elderly, weathered male dwarven blacksmith in his 60s with a deep, gravelly baritone voice, slow pacing."
+    }
+  ],
+  "dialogue_lines": [
+    {
+      "index": 1,
+      "speaker": "Nyx",
+      "character_id": "char_1793042558_12e8f",
+      "text": "The security relay is cycling down, just give me ten more seconds on this terminal—",
+      "clean_subtitle_text": "The security relay is cycling down, just give me ten more seconds on this terminal—",
+      "start_sec": 0.0,
+      "end_sec": 3.71,
+      "duration_sec": 3.71,
+      "pause_after_ms": -220,
+      "stem_file": "lines/001_nyx.wav",
+      "take_id": "take_1793043243_ca6ae6",
+      "take_url": "/audio/takes/take_1793043243_ca6ae6.wav"
+    },
+    {
+      "index": 2,
+      "speaker": "Torvin",
+      "character_id": "char_torvin",
+      "text": "Ten seconds?! The iron golems are already coming down the corridor!",
+      "clean_subtitle_text": "Ten seconds?! The iron golems are already coming down the corridor!",
+      "start_sec": 3.49,
+      "end_sec": 6.95,
+      "duration_sec": 3.45,
+      "pause_after_ms": 220,
+      "stem_file": "lines/002_torvin.wav",
+      "take_id": "take_1793043261_a5354f",
+      "take_url": "/audio/takes/take_1793043261_a5354f.wav"
+    },
+    {
+      "index": 3,
+      "speaker": "Nyx",
+      "character_id": "char_1793042558_12e8f",
+      "text": "Relax, old man! Pull the red lever right now!",
+      "clean_subtitle_text": "Relax, old man! Pull the red lever right now!",
+      "start_sec": 7.17,
+      "end_sec": 9.5,
+      "duration_sec": 2.33,
+      "pause_after_ms": 0,
+      "stem_file": "lines/003_nyx.wav",
+      "take_id": "take_1793043319_a95e34",
+      "take_url": "/audio/takes/take_1793043319_a95e34.wav"
+    }
+  ]
+}

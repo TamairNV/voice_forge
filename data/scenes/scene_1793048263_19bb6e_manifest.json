@@ -1,0 +1,33 @@
+{
+  "scene_id": "scene_1793048263_19bb6e",
+  "title": "bisect",
+  "sample_rate": 24000,
+  "duration_sec": 3.81,
+  "line_count": 1,
+  "master_audio_file": "scene_1793048263_19bb6e.wav",
+  "subtitles_file": "scene_1793048263_19bb6e.srt",
+  "cast": [
+    {
+      "speaker": "Dev M",
+      "character_id": "char_1793048088_b4cb7",
+      "status": "reused_locked_character",
+      "description": "Male university student, 20 years old, bright higher-pitched voice, quick jittery delivery, strong Mancunian northern English accent, grumpy, casual."
+    }
+  ],
+  "dialogue_lines": [
+    {
+      "index": 1,
+      "speaker": "Dev M",
+      "character_id": "char_1793048088_b4cb7",
+      "text": "<curious> Wha... what do you mean? Like rage? Because yeah, I felt that.",
+      "clean_subtitle_text": "Wha... what do you mean? Like rage? Because yeah, I felt that.",
+      "start_sec": 0.0,
+      "end_sec": 3.81,
+      "duration_sec": 3.81,
+      "pause_after_ms": 0,
+      "stem_file": "lines/001_dev_m.wav",
+      "take_id": "take_1793048263_d08ed1",
+      "take_url": "/audio/takes/take_1793048263_d08ed1.wav"
+    }
+  ]
+}

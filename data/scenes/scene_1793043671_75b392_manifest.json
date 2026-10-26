@@ -1,0 +1,151 @@
+{
+  "scene_id": "scene_1793043671_75b392",
+  "title": "Cattin Maya",
+  "sample_rate": 24000,
+  "duration_sec": 50.24,
+  "line_count": 9,
+  "master_audio_file": "scene_1793043671_75b392.wav",
+  "subtitles_file": "scene_1793043671_75b392.srt",
+  "cast": [
+    {
+      "speaker": "Dexter M",
+      "character_id": "char_1793043577_4a890",
+      "status": "created_and_locked",
+      "description": "Male voice in his late teens, American accent, nerdy and nasal, dreamy and intense, soft reverent tone."
+    },
+    {
+      "speaker": "Milo M",
+      "character_id": "char_1793043585_cd304",
+      "status": "created_and_locked",
+      "description": "Male voice in his late teens, American accent, nerdy and nasal, higher pitched, awkward and nervous."
+    }
+  ],
+  "dialogue_lines": [
+    {
+      "index": 1,
+      "speaker": "Dexter M",
+      "character_id": "char_1793043577_4a890",
+      "text": "Hey, remember when we played Cattin with Bobby last Friday?",
+      "clean_subtitle_text": "Hey, remember when we played Cattin with Bobby last Friday?",
+      "start_sec": 0.0,
+      "end_sec": 3.6,
+      "duration_sec": 3.6,
+      "pause_after_ms": 350,
+      "stem_file": "lines/001_dexter_m.wav",
+      "take_id": "take_1793043577_0db618",
+      "take_url": "/audio/takes/take_1793043577_0db618.wav"
+    },
+    {
+      "index": 2,
+      "speaker": "Milo M",
+      "character_id": "char_1793043585_cd304",
+      "text": "Yeah. He built the longest road and then wouldn't trade me a single sheep. Total tyrant.",
+      "clean_subtitle_text": "Yeah. He built the longest road and then wouldn't trade me a single sheep. Total tyrant.",
+      "start_sec": 3.95,
+      "end_sec": 8.65,
+      "duration_sec": 4.7,
+      "pause_after_ms": 350,
+      "stem_file": "lines/002_milo_m.wav",
+      "take_id": "take_1793043585_3b3d13",
+      "take_url": "/audio/takes/take_1793043585_3b3d13.wav"
+    },
+    {
+      "index": 3,
+      "speaker": "Dexter M",
+      "character_id": "char_1793043577_4a890",
+      "text": "<whisper> Don't you get a feeling... when you watch him play like that?",
+      "clean_subtitle_text": "Don't you get a feeling... when you watch him play like that?",
+      "start_sec": 9.0,
+      "end_sec": 13.16,
+      "duration_sec": 4.16,
+      "pause_after_ms": 500,
+      "stem_file": "lines/003_dexter_m.wav",
+      "take_id": "take_1793043595_1e90fc",
+      "take_url": "/audio/takes/take_1793043595_1e90fc.wav"
+    },
+    {
+      "index": 4,
+      "speaker": "Milo M",
+      "character_id": "char_1793043585_cd304",
+      "text": "Wha... what? What do you mean, a feeling? Like, indigestion?",
+      "clean_subtitle_text": "Wha... what? What do you mean, a feeling? Like, indigestion?",
+      "start_sec": 13.66,
+      "end_sec": 17.98,
+      "duration_sec": 4.32,
+      "pause_after_ms": 350,
+      "stem_file": "lines/004_milo_m.wav",
+      "take_id": "take_1793043604_b68150",
+      "take_url": "/audio/takes/take_1793043604_b68150.wav"
+    },
+    {
+      "index": 5,
+      "speaker": "Dexter M",
+      "character_id": "char_1793043577_4a890",
+      "text": "<whisper> The way he moves the pieces... the way he builds. That long... long road of his. <sigh> And the way he whispers, ore for wheat.",
+      "clean_subtitle_text": "The way he moves the pieces... the way he builds. That long... long road of his.  And the way he whispers, ore for wheat.",
+      "start_sec": 18.33,
+      "end_sec": 30.49,
+      "duration_sec": 12.17,
+      "pause_after_ms": 400,
+      "stem_file": "lines/005_dexter_m.wav",
+      "take_id": "take_1793043635_a8ac21",
+      "take_url": "/audio/takes/take_1793043635_a8ac21.wav"
+    },
+    {
+      "index": 6,
+      "speaker": "Milo M",
+      "character_id": "char_1793043585_cd304",
+      "text": "I... guess? He does have really good settlement placement?",
+      "clean_subtitle_text": "I... guess? He does have really good settlement placement?",
+      "start_sec": 30.89,
+      "end_sec": 34.9,
+      "duration_sec": 4.0,
+      "pause_after_ms": 350,
+      "stem_file": "lines/006_milo_m.wav",
+      "take_id": "take_1793043642_454556",
+      "take_url": "/audio/takes/take_1793043642_454556.wav"
+    },
+    {
+      "index": 7,
+      "speaker": "Dexter M",
+      "character_id": "char_1793043577_4a890",
+      "text": "<gasp> And when he rolled a seven and moved the robber? <whisper> I had to leave the room.",
+      "clean_subtitle_text": "And when he rolled a seven and moved the robber?  I had to leave the room.",
+      "start_sec": 35.25,
+      "end_sec": 40.3,
+      "duration_sec": 5.05,
+      "pause_after_ms": 400,
+      "stem_file": "lines/007_dexter_m.wav",
+      "take_id": "take_1793043652_b1c562",
+      "take_url": "/audio/takes/take_1793043652_b1c562.wav"
+    },
+    {
+      "index": 8,
+      "speaker": "Milo M",
+      "character_id": "char_1793043585_cd304",
+      "text": "<gulp> Dude. We were playing at your house.",
+      "clean_subtitle_text": "Dude. We were playing at your house.",
+      "start_sec": 40.7,
+      "end_sec": 42.59,
+      "duration_sec": 1.89,
+      "pause_after_ms": 350,
+      "stem_file": "lines/008_milo_m.wav",
+      "take_id": "take_1793043656_745660",
+      "take_url": "/audio/takes/take_1793043656_745660.wav"
+    },
+    {
+      "index": 9,
+      "speaker": "Dexter M",
+      "character_id": "char_1793043577_4a890",
+      "text": "<whisper> So... you also find him sexy when he plays Cattin?",
+      "clean_subtitle_text": "So... you also find him sexy when he plays Cattin?",
+      "start_sec": 42.94,
+      "end_sec": 50.24,
+      "duration_sec": 7.3,
+      "pause_after_ms": 0,
+      "stem_file": "lines/009_dexter_m.wav",
+      "take_id": "take_1793043671_0720f9",
+      "take_url": "/audio/takes/take_1793043671_0720f9.wav"
+    }
+  ]
+}

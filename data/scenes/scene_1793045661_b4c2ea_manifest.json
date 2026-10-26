@@ -1,0 +1,103 @@
+{
+  "scene_id": "scene_1793045661_b4c2ea",
+  "title": "side_hustle_milk_1 v4 (Qwen3 design, per-line arc)",
+  "sample_rate": 24000,
+  "duration_sec": 36.48,
+  "line_count": 6,
+  "master_audio_file": "scene_1793045661_b4c2ea.wav",
+  "subtitles_file": "scene_1793045661_b4c2ea.srt",
+  "cast": [
+    {
+      "speaker": "Kayleigh_Design",
+      "character_id": null,
+      "status": "designed_new_voice",
+      "description": "A loud, nasal, entitled woman in her mid-20s with an Essex English accent, speaking on her phone far too loudly in public, low-mid baseline pitch with heavy vocal fry, bratty nasal timbre, close-mic studio game dialogue, casual and breezy, relaxed pacing, lazy vocal fry at the ends of phrases."
+    }
+  ],
+  "dialogue_lines": [
+    {
+      "index": 1,
+      "speaker": "Kayleigh_Design",
+      "character_id": null,
+      "text": "Right, don't panic, babe. I've found a new side hustle.",
+      "clean_subtitle_text": "Right, don't panic, babe. I've found a new side hustle.",
+      "start_sec": 0.0,
+      "end_sec": 3.15,
+      "duration_sec": 3.15,
+      "pause_after_ms": 1500,
+      "stem_file": "lines/001_kayleigh_design.wav",
+      "take_id": "take_1793045646_cb247e",
+      "take_url": "/audio/takes/take_1793045646_cb247e.wav"
+    },
+    {
+      "index": 2,
+      "speaker": "Kayleigh_Design",
+      "character_id": null,
+      "text": "Turns out you can sell your breast milk. They call it liquid gold. Look it up.",
+      "clean_subtitle_text": "Turns out you can sell your breast milk. They call it liquid gold. Look it up.",
+      "start_sec": 4.65,
+      "end_sec": 8.53,
+      "duration_sec": 3.88,
+      "pause_after_ms": 2500,
+      "stem_file": "lines/002_kayleigh_design.wav",
+      "take_id": "take_1793045649_8377e4",
+      "take_url": "/audio/takes/take_1793045649_8377e4.wav"
+    },
+    {
+      "index": 3,
+      "speaker": "Kayleigh_Design",
+      "character_id": null,
+      "text": "No. No! This is nothing like the Herbalife thing. Or the crypto. That was different!",
+      "clean_subtitle_text": "No. No! This is nothing like the Herbalife thing. Or the crypto. That was different!",
+      "start_sec": 11.03,
+      "end_sec": 15.43,
+      "duration_sec": 4.4,
+      "pause_after_ms": 2000,
+      "stem_file": "lines/003_kayleigh_design.wav",
+      "take_id": "take_1793045652_07feae",
+      "take_url": "/audio/takes/take_1793045652_07feae.wav"
+    },
+    {
+      "index": 4,
+      "speaker": "Kayleigh_Design",
+      "character_id": null,
+      "text": "Ugh, yes, I met him behind the big Tesco... but he's legit. He's got a van.",
+      "clean_subtitle_text": "Ugh, yes, I met him behind the big Tesco... but he's legit. He's got a van.",
+      "start_sec": 17.43,
+      "end_sec": 22.87,
+      "duration_sec": 5.44,
+      "pause_after_ms": 300,
+      "stem_file": "lines/004_kayleigh_design.wav",
+      "take_id": "take_1793045655_3c540e",
+      "take_url": "/audio/takes/take_1793045655_3c540e.wav"
+    },
+    {
+      "index": 5,
+      "speaker": "Kayleigh_Design",
+      "character_id": null,
+      "text": "And he gave me a business card. With a QR code, Debbie. A QR code.",
+      "clean_subtitle_text": "And he gave me a business card. With a QR code, Debbie. A QR code.",
+      "start_sec": 23.17,
+      "end_sec": 28.27,
+      "duration_sec": 5.1,
+      "pause_after_ms": 3000,
+      "stem_file": "lines/005_kayleigh_design.wav",
+      "take_id": "take_1793045658_b21ff2",
+      "take_url": "/audio/takes/take_1793045658_b21ff2.wav"
+    },
+    {
+      "index": 6,
+      "speaker": "Kayleigh_Design",
+      "character_id": null,
+      "text": "Wow. You know what? You've always been jealous. You just don't want me to succeed!",
+      "clean_subtitle_text": "Wow. You know what? You've always been jealous. You just don't want me to succeed!",
+      "start_sec": 31.27,
+      "end_sec": 36.48,
+      "duration_sec": 5.21,
+      "pause_after_ms": 0,
+      "stem_file": "lines/006_kayleigh_design.wav",
+      "take_id": "take_1793045661_ca7e7a",
+      "take_url": "/audio/takes/take_1793045661_ca7e7a.wav"
+    }
+  ]
+}

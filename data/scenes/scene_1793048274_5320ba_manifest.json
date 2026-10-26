@@ -1,0 +1,33 @@
+{
+  "scene_id": "scene_1793048274_5320ba",
+  "title": "bisect",
+  "sample_rate": 24000,
+  "duration_sec": 2.6,
+  "line_count": 1,
+  "master_audio_file": "scene_1793048274_5320ba.wav",
+  "subtitles_file": "scene_1793048274_5320ba.srt",
+  "cast": [
+    {
+      "speaker": "Dev M",
+      "character_id": "char_1793048088_b4cb7",
+      "status": "reused_locked_character",
+      "description": "Male university student, 20 years old, bright higher-pitched voice, quick jittery delivery, strong Mancunian northern English accent, grumpy, casual."
+    }
+  ],
+  "dialogue_lines": [
+    {
+      "index": 1,
+      "speaker": "Dev M",
+      "character_id": "char_1793048088_b4cb7",
+      "text": "<curious> I... guess? It was twelve roads long.",
+      "clean_subtitle_text": "I... guess? It was twelve roads long.",
+      "start_sec": 0.0,
+      "end_sec": 2.6,
+      "duration_sec": 2.6,
+      "pause_after_ms": 0,
+      "stem_file": "lines/001_dev_m.wav",
+      "take_id": "take_1793048274_71f567",
+      "take_url": "/audio/takes/take_1793048274_71f567.wav"
+    }
+  ]
+}

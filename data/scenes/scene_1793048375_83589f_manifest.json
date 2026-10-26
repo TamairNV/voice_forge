@@ -1,0 +1,47 @@
+{
+  "scene_id": "scene_1793048375_83589f",
+  "title": "b",
+  "sample_rate": 24000,
+  "duration_sec": 8.04,
+  "line_count": 2,
+  "master_audio_file": "scene_1793048375_83589f.wav",
+  "subtitles_file": "scene_1793048375_83589f.srt",
+  "cast": [
+    {
+      "speaker": "Rory M",
+      "character_id": "char_1793048083_6f5e6",
+      "status": "reused_locked_character",
+      "description": "Male university student, 20 years old, deep soft low voice, slow dreamy deadpan delivery, posh southern English accent, calm, casual."
+    }
+  ],
+  "dialogue_lines": [
+    {
+      "index": 1,
+      "speaker": "Rory M",
+      "character_id": "char_1793048083_6f5e6",
+      "text": "Do you remember when we played Catten with Bobby last week?",
+      "clean_subtitle_text": "Do you remember when we played Catten with Bobby last week?",
+      "start_sec": 0.0,
+      "end_sec": 3.28,
+      "duration_sec": 3.28,
+      "pause_after_ms": 350,
+      "stem_file": "lines/001_rory_m.wav",
+      "take_id": "take_1793048373_bb307e",
+      "take_url": "/audio/takes/take_1793048373_bb307e.wav"
+    },
+    {
+      "index": 2,
+      "speaker": "Rory M",
+      "character_id": "char_1793048083_6f5e6",
+      "text": "Twelve roads. Exactly, twelve whole roads.",
+      "clean_subtitle_text": "Twelve roads. Exactly, twelve whole roads.",
+      "start_sec": 3.63,
+      "end_sec": 8.04,
+      "duration_sec": 4.41,
+      "pause_after_ms": 0,
+      "stem_file": "lines/002_rory_m.wav",
+      "take_id": "take_1793048375_0d4a96",
+      "take_url": "/audio/takes/take_1793048375_0d4a96.wav"
+    }
+  ]
+}

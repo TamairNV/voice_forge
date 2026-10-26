@@ -1,0 +1,11 @@
+1
+00:00:00,000 --> 00:00:03,710
+Nyx: The security relay is cycling down, just give me ten more seconds on this terminal—
+
+2
+00:00:03,490 --> 00:00:06,950
+Torvin: Ten seconds?! The iron golems are already coming down the corridor!
+
+3
+00:00:07,170 --> 00:00:09,500
+Nyx: Relax, old man! Pull the red lever right now!

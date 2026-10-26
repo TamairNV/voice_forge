@@ -1,0 +1,103 @@
+{
+  "scene_id": "scene_1793045777_b81da5",
+  "title": "side_hustle_milk_1 v4 (Qwen3 design, per-line arc)",
+  "sample_rate": 24000,
+  "duration_sec": 35.34,
+  "line_count": 6,
+  "master_audio_file": "scene_1793045777_b81da5.wav",
+  "subtitles_file": "scene_1793045777_b81da5.srt",
+  "cast": [
+    {
+      "speaker": "Kayleigh_Design",
+      "character_id": null,
+      "status": "designed_new_voice",
+      "description": "A loud, nasal, entitled woman in her mid-20s with an Essex English accent, speaking on her phone far too loudly in public, low alto chest-voice baseline pitch with no shrillness, deep-for-a-woman husky tone with heavy vocal fry, bratty nasal timbre, close-mic studio game dialogue, casual and breezy, relaxed pacing, lazy vocal fry at the ends of phrases."
+    }
+  ],
+  "dialogue_lines": [
+    {
+      "index": 1,
+      "speaker": "Kayleigh_Design",
+      "character_id": null,
+      "text": "Right, don't panic, babe. I've found a new side hustle.",
+      "clean_subtitle_text": "Right, don't panic, babe. I've found a new side hustle.",
+      "start_sec": 0.0,
+      "end_sec": 3.08,
+      "duration_sec": 3.08,
+      "pause_after_ms": 1500,
+      "stem_file": "lines/001_kayleigh_design.wav",
+      "take_id": "take_1793045763_63db58",
+      "take_url": "/audio/takes/take_1793045763_63db58.wav"
+    },
+    {
+      "index": 2,
+      "speaker": "Kayleigh_Design",
+      "character_id": null,
+      "text": "Turns out you can sell your breast milk. They call it liquid gold. Look it up.",
+      "clean_subtitle_text": "Turns out you can sell your breast milk. They call it liquid gold. Look it up.",
+      "start_sec": 4.58,
+      "end_sec": 8.69,
+      "duration_sec": 4.11,
+      "pause_after_ms": 2500,
+      "stem_file": "lines/002_kayleigh_design.wav",
+      "take_id": "take_1793045765_e9aaa3",
+      "take_url": "/audio/takes/take_1793045765_e9aaa3.wav"
+    },
+    {
+      "index": 3,
+      "speaker": "Kayleigh_Design",
+      "character_id": null,
+      "text": "No. No! This is nothing like the Herbalife thing. Or the crypto. That was different!",
+      "clean_subtitle_text": "No. No! This is nothing like the Herbalife thing. Or the crypto. That was different!",
+      "start_sec": 11.19,
+      "end_sec": 15.14,
+      "duration_sec": 3.94,
+      "pause_after_ms": 2000,
+      "stem_file": "lines/003_kayleigh_design.wav",
+      "take_id": "take_1793045768_e5f402",
+      "take_url": "/audio/takes/take_1793045768_e5f402.wav"
+    },
+    {
+      "index": 4,
+      "speaker": "Kayleigh_Design",
+      "character_id": null,
+      "text": "Ugh, yes, I met him behind the big Tesco... but he's legit. He's got a van.",
+      "clean_subtitle_text": "Ugh, yes, I met him behind the big Tesco... but he's legit. He's got a van.",
+      "start_sec": 17.14,
+      "end_sec": 22.21,
+      "duration_sec": 5.07,
+      "pause_after_ms": 300,
+      "stem_file": "lines/004_kayleigh_design.wav",
+      "take_id": "take_1793045771_aae2f0",
+      "take_url": "/audio/takes/take_1793045771_aae2f0.wav"
+    },
+    {
+      "index": 5,
+      "speaker": "Kayleigh_Design",
+      "character_id": null,
+      "text": "And he gave me a business card. With a QR code, Debbie. A QR code.",
+      "clean_subtitle_text": "And he gave me a business card. With a QR code, Debbie. A QR code.",
+      "start_sec": 22.51,
+      "end_sec": 27.43,
+      "duration_sec": 4.92,
+      "pause_after_ms": 3000,
+      "stem_file": "lines/005_kayleigh_design.wav",
+      "take_id": "take_1793045774_f43fe5",
+      "take_url": "/audio/takes/take_1793045774_f43fe5.wav"
+    },
+    {
+      "index": 6,
+      "speaker": "Kayleigh_Design",
+      "character_id": null,
+      "text": "Wow. You know what? You've always been jealous. You just don't want me to succeed!",
+      "clean_subtitle_text": "Wow. You know what? You've always been jealous. You just don't want me to succeed!",
+      "start_sec": 30.43,
+      "end_sec": 35.34,
+      "duration_sec": 4.92,
+      "pause_after_ms": 0,
+      "stem_file": "lines/006_kayleigh_design.wav",
+      "take_id": "take_1793045777_82c429",
+      "take_url": "/audio/takes/take_1793045777_82c429.wav"
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "scene_id": "scene_1793048279_65572b",
+  "title": "bisect",
+  "sample_rate": 24000,
+  "duration_sec": 2.08,
+  "line_count": 1,
+  "master_audio_file": "scene_1793048279_65572b.wav",
+  "subtitles_file": "scene_1793048279_65572b.srt",
+  "cast": [
+    {
+      "speaker": "Dev M",
+      "character_id": "char_1793048088_b4cb7",
+      "status": "reused_locked_character",
+      "description": "Male university student, 20 years old, bright higher-pitched voice, quick jittery delivery, strong Mancunian northern English accent, grumpy, casual."
+    }
+  ],
+  "dialogue_lines": [
+    {
+      "index": 1,
+      "speaker": "Dev M",
+      "character_id": "char_1793048088_b4cb7",
+      "text": "<exhale> Rory. Mate. It's a board game.",
+      "clean_subtitle_text": "Rory. Mate. It's a board game.",
+      "start_sec": 0.0,
+      "end_sec": 2.08,
+      "duration_sec": 2.08,
+      "pause_after_ms": 0,
+      "stem_file": "lines/001_dev_m.wav",
+      "take_id": "take_1793048279_426aa2",
+      "take_url": "/audio/takes/take_1793048279_426aa2.wav"
+    }
+  ]
+}

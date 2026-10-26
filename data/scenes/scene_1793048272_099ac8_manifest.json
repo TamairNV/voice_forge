@@ -1,0 +1,33 @@
+{
+  "scene_id": "scene_1793048272_099ac8",
+  "title": "bisect",
+  "sample_rate": 24000,
+  "duration_sec": 6.63,
+  "line_count": 1,
+  "master_audio_file": "scene_1793048272_099ac8.wav",
+  "subtitles_file": "scene_1793048272_099ac8.srt",
+  "cast": [
+    {
+      "speaker": "Rory M",
+      "character_id": "char_1793048083_6f5e6",
+      "status": "reused_locked_character",
+      "description": "Male university student, 20 years old, deep soft low voice, slow dreamy deadpan delivery, posh southern English accent, calm, casual."
+    }
+  ],
+  "dialogue_lines": [
+    {
+      "index": 1,
+      "speaker": "Rory M",
+      "character_id": "char_1793048083_6f5e6",
+      "text": "<excited> The way he moves the pieces. The way he builds. That long... long road of his.",
+      "clean_subtitle_text": "The way he moves the pieces. The way he builds. That long... long road of his.",
+      "start_sec": 0.0,
+      "end_sec": 6.63,
+      "duration_sec": 6.63,
+      "pause_after_ms": 0,
+      "stem_file": "lines/001_rory_m.wav",
+      "take_id": "take_1793048272_c1b775",
+      "take_url": "/audio/takes/take_1793048272_c1b775.wav"
+    }
+  ]
+}

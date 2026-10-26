@@ -1,0 +1,27 @@
+1
+00:00:00,000 --> 00:00:02,920
+T: Option 1. Let's play Catan tonight.
+
+2
+00:00:03,520 --> 00:00:06,260
+T: Option 2. Let's play Cattin tonight.
+
+3
+00:00:06,860 --> 00:00:09,600
+T: Option 3. Let's play Catten tonight.
+
+4
+00:00:10,200 --> 00:00:13,220
+T: Option 4. Let's play Cat-in tonight.
+
+5
+00:00:13,820 --> 00:00:17,160
+T: Option 5. Let's play Cat in tonight.
+
+6
+00:00:17,760 --> 00:00:20,680
+T: Option 6. Let's play Katen tonight.
+
+7
+00:00:21,280 --> 00:00:24,440
+T: Option 7. Let's play Kat-un tonight.

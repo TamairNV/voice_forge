@@ -1,0 +1,131 @@
+{
+  "scene_id": "scene_1793044037_3c1a45",
+  "title": "Chantelle M",
+  "sample_rate": 24000,
+  "duration_sec": 33.27,
+  "line_count": 8,
+  "master_audio_file": "scene_1793044037_3c1a45.wav",
+  "subtitles_file": "scene_1793044037_3c1a45.srt",
+  "cast": [
+    {
+      "speaker": "Chantelle M",
+      "character_id": "char_1793043998_cf0eb",
+      "status": "created_and_locked",
+      "description": "A young woman in her 20s with a chatty, slightly nasal British Essex accent, casual and upbeat, talking on the phone while walking outside, with a defensive streak."
+    }
+  ],
+  "dialogue_lines": [
+    {
+      "index": 1,
+      "speaker": "Chantelle M",
+      "character_id": "char_1793043998_cf0eb",
+      "text": "Don't worry, I found a new side hustle.",
+      "clean_subtitle_text": "Don't worry, I found a new side hustle.",
+      "start_sec": 0.0,
+      "end_sec": 1.9,
+      "duration_sec": 1.9,
+      "pause_after_ms": 1500,
+      "stem_file": "lines/001_chantelle_m.wav",
+      "take_id": "take_1793043998_ba8fe6",
+      "take_url": "/audio/takes/take_1793043998_ba8fe6.wav"
+    },
+    {
+      "index": 2,
+      "speaker": "Chantelle M",
+      "character_id": "char_1793043998_cf0eb",
+      "text": "I found out I can sell my breast milk.",
+      "clean_subtitle_text": "I found out I can sell my breast milk.",
+      "start_sec": 3.4,
+      "end_sec": 5.3,
+      "duration_sec": 1.9,
+      "pause_after_ms": 2500,
+      "stem_file": "lines/002_chantelle_m.wav",
+      "take_id": "take_1793044002_560319",
+      "take_url": "/audio/takes/take_1793044002_560319.wav"
+    },
+    {
+      "index": 3,
+      "speaker": "Chantelle M",
+      "character_id": "char_1793043998_cf0eb",
+      "text": "<angry> No! This isn't like last time.",
+      "clean_subtitle_text": "No! This isn't like last time.",
+      "start_sec": 7.8,
+      "end_sec": 10.09,
+      "duration_sec": 2.29,
+      "pause_after_ms": 2000,
+      "stem_file": "lines/003_chantelle_m.wav",
+      "take_id": "take_1793044006_b4d643",
+      "take_url": "/audio/takes/take_1793044006_b4d643.wav"
+    },
+    {
+      "index": 4,
+      "speaker": "Chantelle M",
+      "character_id": "char_1793043998_cf0eb",
+      "text": "Last time was a misunderstanding. This is a proper business. I'm basically a dairy farmer, but, like, with better branding.",
+      "clean_subtitle_text": "Last time was a misunderstanding. This is a proper business. I'm basically a dairy farmer, but, like, with better branding.",
+      "start_sec": 12.09,
+      "end_sec": 18.07,
+      "duration_sec": 5.98,
+      "pause_after_ms": 700,
+      "stem_file": "lines/004_chantelle_m.wav",
+      "take_id": "take_1793044017_239872",
+      "take_url": "/audio/takes/take_1793044017_239872.wav"
+    },
+    {
+      "index": 5,
+      "speaker": "Chantelle M",
+      "character_id": "char_1793043998_cf0eb",
+      "text": "<angry> Okay, yes, it's behind a Tesco. But he's legit.",
+      "clean_subtitle_text": "Okay, yes, it's behind a Tesco. But he's legit.",
+      "start_sec": 18.77,
+      "end_sec": 21.6,
+      "duration_sec": 2.83,
+      "pause_after_ms": 500,
+      "stem_file": "lines/005_chantelle_m.wav",
+      "take_id": "take_1793044022_61d421",
+      "take_url": "/audio/takes/take_1793044022_61d421.wav"
+    },
+    {
+      "index": 6,
+      "speaker": "Chantelle M",
+      "character_id": "char_1793043998_cf0eb",
+      "text": "He had a business card.",
+      "clean_subtitle_text": "He had a business card.",
+      "start_sec": 22.1,
+      "end_sec": 23.38,
+      "duration_sec": 1.28,
+      "pause_after_ms": 3000,
+      "stem_file": "lines/006_chantelle_m.wav",
+      "take_id": "take_1793044025_f181cb",
+      "take_url": "/audio/takes/take_1793044025_f181cb.wav"
+    },
+    {
+      "index": 7,
+      "speaker": "Chantelle M",
+      "character_id": "char_1793043998_cf0eb",
+      "text": "Laminated, Karen. It said 'Dairy Consultant'. Who laminates a fake card?",
+      "clean_subtitle_text": "Laminated, Karen. It said 'Dairy Consultant'. Who laminates a fake card?",
+      "start_sec": 26.38,
+      "end_sec": 30.47,
+      "duration_sec": 4.09,
+      "pause_after_ms": 1200,
+      "stem_file": "lines/007_chantelle_m.wav",
+      "take_id": "take_1793044034_38e183",
+      "take_url": "/audio/takes/take_1793044034_38e183.wav"
+    },
+    {
+      "index": 8,
+      "speaker": "Chantelle M",
+      "character_id": "char_1793043998_cf0eb",
+      "text": "<disappointed> You just don't want me to succeed.",
+      "clean_subtitle_text": "You just don't want me to succeed.",
+      "start_sec": 31.67,
+      "end_sec": 33.27,
+      "duration_sec": 1.61,
+      "pause_after_ms": 0,
+      "stem_file": "lines/008_chantelle_m.wav",
+      "take_id": "take_1793044037_53ec48",
+      "take_url": "/audio/takes/take_1793044037_53ec48.wav"
+    }
+  ]
+}

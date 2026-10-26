@@ -1,0 +1,131 @@
+{
+  "scene_id": "scene_1793044107_7db045",
+  "title": "Chantelle",
+  "sample_rate": 24000,
+  "duration_sec": 41.5,
+  "line_count": 8,
+  "master_audio_file": "scene_1793044107_7db045.wav",
+  "subtitles_file": "scene_1793044107_7db045.srt",
+  "cast": [
+    {
+      "speaker": "Chantelle",
+      "character_id": "char_1793044091_9bd03",
+      "status": "created_and_locked",
+      "description": "A young woman in her early 20s with a thick, loud, bubbly Essex accent. Wildly overconfident hustle-culture girlboss, gullible, dramatic and very expressive, talking on her phone while walking outside, with big emotional swings from excited to defensive to wounded."
+    }
+  ],
+  "dialogue_lines": [
+    {
+      "index": 1,
+      "speaker": "Chantelle",
+      "character_id": "char_1793044091_9bd03",
+      "text": "Babes! Don't worry! I've found a new side hustle!",
+      "clean_subtitle_text": "Babes! Don't worry! I've found a new side hustle!",
+      "start_sec": 0.0,
+      "end_sec": 3.1,
+      "duration_sec": 3.1,
+      "pause_after_ms": 1500,
+      "stem_file": "lines/001_chantelle.wav",
+      "take_id": "take_1793044091_b23b6f",
+      "take_url": "/audio/takes/take_1793044091_b23b6f.wav"
+    },
+    {
+      "index": 2,
+      "speaker": "Chantelle",
+      "character_id": "char_1793044091_9bd03",
+      "text": "I found out... I can sell my breast milk.",
+      "clean_subtitle_text": "I found out... I can sell my breast milk.",
+      "start_sec": 4.6,
+      "end_sec": 6.6,
+      "duration_sec": 2.0,
+      "pause_after_ms": 2500,
+      "stem_file": "lines/002_chantelle.wav",
+      "take_id": "take_1793044093_e0edf6",
+      "take_url": "/audio/takes/take_1793044093_e0edf6.wav"
+    },
+    {
+      "index": 3,
+      "speaker": "Chantelle",
+      "character_id": "char_1793044091_9bd03",
+      "text": "No! No, no, no! This is not like last time!",
+      "clean_subtitle_text": "No! No, no, no! This is not like last time!",
+      "start_sec": 9.1,
+      "end_sec": 11.86,
+      "duration_sec": 2.76,
+      "pause_after_ms": 2000,
+      "stem_file": "lines/003_chantelle.wav",
+      "take_id": "take_1793044095_6dc61a",
+      "take_url": "/audio/takes/take_1793044095_6dc61a.wav"
+    },
+    {
+      "index": 4,
+      "speaker": "Chantelle",
+      "character_id": "char_1793044091_9bd03",
+      "text": "The lash thing was a learning experience! The crypto was a learning experience! This is the one, Karen, I can feel it. I've been manifesting!",
+      "clean_subtitle_text": "The lash thing was a learning experience! The crypto was a learning experience! This is the one, Karen, I can feel it. I've been manifesting!",
+      "start_sec": 13.86,
+      "end_sec": 20.48,
+      "duration_sec": 6.62,
+      "pause_after_ms": 700,
+      "stem_file": "lines/004_chantelle.wav",
+      "take_id": "take_1793044099_09aaff",
+      "take_url": "/audio/takes/take_1793044099_09aaff.wav"
+    },
+    {
+      "index": 5,
+      "speaker": "Chantelle",
+      "character_id": "char_1793044091_9bd03",
+      "text": "Okay, yes. It's behind a Tesco. But he's legit!",
+      "clean_subtitle_text": "Okay, yes. It's behind a Tesco. But he's legit!",
+      "start_sec": 21.18,
+      "end_sec": 24.5,
+      "duration_sec": 3.32,
+      "pause_after_ms": 500,
+      "stem_file": "lines/005_chantelle.wav",
+      "take_id": "take_1793044101_efbcc6",
+      "take_url": "/audio/takes/take_1793044101_efbcc6.wav"
+    },
+    {
+      "index": 6,
+      "speaker": "Chantelle",
+      "character_id": "char_1793044091_9bd03",
+      "text": "He had a business card!",
+      "clean_subtitle_text": "He had a business card!",
+      "start_sec": 25.0,
+      "end_sec": 26.4,
+      "duration_sec": 1.4,
+      "pause_after_ms": 3000,
+      "stem_file": "lines/006_chantelle.wav",
+      "take_id": "take_1793044102_a81797",
+      "take_url": "/audio/takes/take_1793044102_a81797.wav"
+    },
+    {
+      "index": 7,
+      "speaker": "Chantelle",
+      "character_id": "char_1793044091_9bd03",
+      "text": "He said I've got serious supplier potential. Nobody's ever said that to me before, Karen. Not even my own mum.",
+      "clean_subtitle_text": "He said I've got serious supplier potential. Nobody's ever said that to me before, Karen. Not even my own mum.",
+      "start_sec": 29.4,
+      "end_sec": 36.13,
+      "duration_sec": 6.73,
+      "pause_after_ms": 1200,
+      "stem_file": "lines/007_chantelle.wav",
+      "take_id": "take_1793044105_d4f60b",
+      "take_url": "/audio/takes/take_1793044105_d4f60b.wav"
+    },
+    {
+      "index": 8,
+      "speaker": "Chantelle",
+      "character_id": "char_1793044091_9bd03",
+      "text": "When I'm on the cover of Forbes, don't come crying to me. You just don't want me to succeed.",
+      "clean_subtitle_text": "When I'm on the cover of Forbes, don't come crying to me. You just don't want me to succeed.",
+      "start_sec": 37.33,
+      "end_sec": 41.5,
+      "duration_sec": 4.17,
+      "pause_after_ms": 0,
+      "stem_file": "lines/008_chantelle.wav",
+      "take_id": "take_1793044107_3e572c",
+      "take_url": "/audio/takes/take_1793044107_3e572c.wav"
+    }
+  ]
+}

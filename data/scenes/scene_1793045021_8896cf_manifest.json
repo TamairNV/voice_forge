@@ -1,0 +1,103 @@
+{
+  "scene_id": "scene_1793045021_8896cf",
+  "title": "side_hustle_milk_1 (Improved Comedy Script - Maya-1 Acting)",
+  "sample_rate": 24000,
+  "duration_sec": 39.31,
+  "line_count": 6,
+  "master_audio_file": "scene_1793045021_8896cf.wav",
+  "subtitles_file": "scene_1793045021_8896cf.srt",
+  "cast": [
+    {
+      "speaker": "Chloe_Maya",
+      "character_id": null,
+      "status": "designed_new_voice",
+      "description": "Entitled bratty 25-year-old female Karen influencer, Female voice in her 20s with a British accent, medium-high nasal pitch, sharp crisp vocal timbre, brisk condescending pacing, casual smug self-satisfied tone at medium intensity."
+    }
+  ],
+  "dialogue_lines": [
+    {
+      "index": 1,
+      "speaker": "Chloe_Maya",
+      "character_id": null,
+      "text": "<sigh> Babe, stop lecturing me about rent, okay? I literally just unlocked a passive income stream.",
+      "clean_subtitle_text": "Babe, stop lecturing me about rent, okay? I literally just unlocked a passive income stream.",
+      "start_sec": 0.0,
+      "end_sec": 6.1,
+      "duration_sec": 6.1,
+      "pause_after_ms": 1500,
+      "stem_file": "lines/001_chloe_maya.wav",
+      "take_id": "take_1793044968_1657f2",
+      "take_url": "/audio/takes/take_1793044968_1657f2.wav"
+    },
+    {
+      "index": 2,
+      "speaker": "Chloe_Maya",
+      "character_id": null,
+      "text": "Liquid gold, hun. <chuckle> I'm selling my breast milk to bodybuilders.",
+      "clean_subtitle_text": "Liquid gold, hun.  I'm selling my breast milk to bodybuilders.",
+      "start_sec": 7.6,
+      "end_sec": 11.3,
+      "duration_sec": 3.7,
+      "pause_after_ms": 2500,
+      "stem_file": "lines/002_chloe_maya.wav",
+      "take_id": "take_1793044976_a9576d",
+      "take_url": "/audio/takes/take_1793044976_a9576d.wav"
+    },
+    {
+      "index": 3,
+      "speaker": "Chloe_Maya",
+      "character_id": null,
+      "text": "<gasp> Excuse me?! No, this is nothing like the dog-breeding incident!",
+      "clean_subtitle_text": "Excuse me?! No, this is nothing like the dog-breeding incident!",
+      "start_sec": 13.8,
+      "end_sec": 18.92,
+      "duration_sec": 5.12,
+      "pause_after_ms": 2000,
+      "stem_file": "lines/003_chloe_maya.wav",
+      "take_id": "take_1793044987_22188a",
+      "take_url": "/audio/takes/take_1793044987_22188a.wav"
+    },
+    {
+      "index": 4,
+      "speaker": "Chloe_Maya",
+      "character_id": null,
+      "text": "Okay, yes, we met behind the big Tesco by the recycling bins, <snort> but he is a serious investor!",
+      "clean_subtitle_text": "Okay, yes, we met behind the big Tesco by the recycling bins,  but he is a serious investor!",
+      "start_sec": 20.92,
+      "end_sec": 25.88,
+      "duration_sec": 4.95,
+      "pause_after_ms": 350,
+      "stem_file": "lines/004_chloe_maya.wav",
+      "take_id": "take_1793044997_1ca7e1",
+      "take_url": "/audio/takes/take_1793044997_1ca7e1.wav"
+    },
+    {
+      "index": 5,
+      "speaker": "Chloe_Maya",
+      "character_id": null,
+      "text": "He literally handed me a business card. It was laminated, Sharon. Laminated!",
+      "clean_subtitle_text": "He literally handed me a business card. It was laminated, Sharon. Laminated!",
+      "start_sec": 26.23,
+      "end_sec": 29.94,
+      "duration_sec": 3.71,
+      "pause_after_ms": 3000,
+      "stem_file": "lines/005_chloe_maya.wav",
+      "take_id": "take_1793045006_cc9822",
+      "take_url": "/audio/takes/take_1793045006_cc9822.wav"
+    },
+    {
+      "index": 6,
+      "speaker": "Chloe_Maya",
+      "character_id": null,
+      "text": "<sigh> Wow. Honestly, the toxic negativity from you right now? You just hate seeing a female founder win!",
+      "clean_subtitle_text": "Wow. Honestly, the toxic negativity from you right now? You just hate seeing a female founder win!",
+      "start_sec": 32.94,
+      "end_sec": 39.31,
+      "duration_sec": 6.37,
+      "pause_after_ms": 0,
+      "stem_file": "lines/006_chloe_maya.wav",
+      "take_id": "take_1793045021_70adfb",
+      "take_url": "/audio/takes/take_1793045021_70adfb.wav"
+    }
+  ]
+}

@@ -1,0 +1,131 @@
+{
+  "scene_id": "scene_1793043992_e77ea9",
+  "title": "Chantelle",
+  "sample_rate": 24000,
+  "duration_sec": 34.0,
+  "line_count": 8,
+  "master_audio_file": "scene_1793043992_e77ea9.wav",
+  "subtitles_file": "scene_1793043992_e77ea9.srt",
+  "cast": [
+    {
+      "speaker": "Chantelle",
+      "character_id": "char_1793043980_fb83f",
+      "status": "created_and_locked",
+      "description": "A young woman in her 20s with a chatty, slightly nasal British Essex accent, casual and upbeat, talking on the phone while walking outside, with a defensive streak."
+    }
+  ],
+  "dialogue_lines": [
+    {
+      "index": 1,
+      "speaker": "Chantelle",
+      "character_id": "char_1793043980_fb83f",
+      "text": "Don't worry, I found a new side hustle.",
+      "clean_subtitle_text": "Don't worry, I found a new side hustle.",
+      "start_sec": 0.0,
+      "end_sec": 2.21,
+      "duration_sec": 2.21,
+      "pause_after_ms": 1500,
+      "stem_file": "lines/001_chantelle.wav",
+      "take_id": "take_1793043980_8fd811",
+      "take_url": "/audio/takes/take_1793043980_8fd811.wav"
+    },
+    {
+      "index": 2,
+      "speaker": "Chantelle",
+      "character_id": "char_1793043980_fb83f",
+      "text": "I found out I can sell my breast milk.",
+      "clean_subtitle_text": "I found out I can sell my breast milk.",
+      "start_sec": 3.71,
+      "end_sec": 5.6,
+      "duration_sec": 1.89,
+      "pause_after_ms": 2500,
+      "stem_file": "lines/002_chantelle.wav",
+      "take_id": "take_1793043982_efdfea",
+      "take_url": "/audio/takes/take_1793043982_efdfea.wav"
+    },
+    {
+      "index": 3,
+      "speaker": "Chantelle",
+      "character_id": "char_1793043980_fb83f",
+      "text": "No! This isn't like last time.",
+      "clean_subtitle_text": "No! This isn't like last time.",
+      "start_sec": 8.1,
+      "end_sec": 10.4,
+      "duration_sec": 2.3,
+      "pause_after_ms": 2000,
+      "stem_file": "lines/003_chantelle.wav",
+      "take_id": "take_1793043983_3d9590",
+      "take_url": "/audio/takes/take_1793043983_3d9590.wav"
+    },
+    {
+      "index": 4,
+      "speaker": "Chantelle",
+      "character_id": "char_1793043980_fb83f",
+      "text": "Last time was a misunderstanding. This is a proper business. I'm basically a dairy farmer, but, like, with better branding.",
+      "clean_subtitle_text": "Last time was a misunderstanding. This is a proper business. I'm basically a dairy farmer, but, like, with better branding.",
+      "start_sec": 12.4,
+      "end_sec": 18.9,
+      "duration_sec": 6.5,
+      "pause_after_ms": 700,
+      "stem_file": "lines/004_chantelle.wav",
+      "take_id": "take_1793043987_9c5245",
+      "take_url": "/audio/takes/take_1793043987_9c5245.wav"
+    },
+    {
+      "index": 5,
+      "speaker": "Chantelle",
+      "character_id": "char_1793043980_fb83f",
+      "text": "Okay, yes, it's behind a Tesco. But he's legit.",
+      "clean_subtitle_text": "Okay, yes, it's behind a Tesco. But he's legit.",
+      "start_sec": 19.6,
+      "end_sec": 22.58,
+      "duration_sec": 2.98,
+      "pause_after_ms": 500,
+      "stem_file": "lines/005_chantelle.wav",
+      "take_id": "take_1793043989_07d6ed",
+      "take_url": "/audio/takes/take_1793043989_07d6ed.wav"
+    },
+    {
+      "index": 6,
+      "speaker": "Chantelle",
+      "character_id": "char_1793043980_fb83f",
+      "text": "He had a business card.",
+      "clean_subtitle_text": "He had a business card.",
+      "start_sec": 23.08,
+      "end_sec": 24.32,
+      "duration_sec": 1.24,
+      "pause_after_ms": 3000,
+      "stem_file": "lines/006_chantelle.wav",
+      "take_id": "take_1793043989_966ff1",
+      "take_url": "/audio/takes/take_1793043989_966ff1.wav"
+    },
+    {
+      "index": 7,
+      "speaker": "Chantelle",
+      "character_id": "char_1793043980_fb83f",
+      "text": "Laminated, Karen. It said 'Dairy Consultant'. Who laminates a fake card?",
+      "clean_subtitle_text": "Laminated, Karen. It said 'Dairy Consultant'. Who laminates a fake card?",
+      "start_sec": 27.32,
+      "end_sec": 31.27,
+      "duration_sec": 3.95,
+      "pause_after_ms": 1200,
+      "stem_file": "lines/007_chantelle.wav",
+      "take_id": "take_1793043991_0127e2",
+      "take_url": "/audio/takes/take_1793043991_0127e2.wav"
+    },
+    {
+      "index": 8,
+      "speaker": "Chantelle",
+      "character_id": "char_1793043980_fb83f",
+      "text": "You just don't want me to succeed.",
+      "clean_subtitle_text": "You just don't want me to succeed.",
+      "start_sec": 32.47,
+      "end_sec": 34.0,
+      "duration_sec": 1.53,
+      "pause_after_ms": 0,
+      "stem_file": "lines/008_chantelle.wav",
+      "take_id": "take_1793043992_062425",
+      "take_url": "/audio/takes/take_1793043992_062425.wav"
+    }
+  ]
+}
