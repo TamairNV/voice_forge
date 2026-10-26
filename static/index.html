@@ -987,34 +987,37 @@
 
           <!-- MULTI-CHARACTER SCENE SCRIPT MODE -->
           <div class="studio-top" id="editorSceneMode" style="display: none;">
-            <div style="display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 10px; flex-shrink: 0;">
+            <div style="display: grid; grid-template-columns: 1.35fr 0.75fr 1.15fr; gap: 10px; flex-shrink: 0;">
               <div class="field-group">
-                <div class="field-label"><span>Scene Title</span></div>
+                <div class="field-label"><span>Scene / Skit Title</span></div>
                 <input type="text" id="sceneTitleInput" value="Tavern Confrontation" placeholder="e.g., Tavern Confrontation" />
               </div>
               <div class="field-group">
                 <div class="field-label"><span>Turn Gap (ms)</span></div>
-                <input type="text" id="scenePauseInput" value="280" placeholder="280" />
+                <input type="text" id="scenePauseInput" value="250" placeholder="250 (or -150 overlap)" />
               </div>
               <div class="field-group">
-                <div class="field-label"><span>Sample Scripts</span></div>
-                <button class="btn-sm emerald" style="height: 35px; justify-content: center;" onclick="loadDemoScript()">📜 Load Demo Game Scene</button>
+                <div class="field-label"><span>Game Skit Templates</span></div>
+                <div style="display: flex; gap: 4px;">
+                  <button class="btn-sm emerald" style="flex: 1; height: 35px; justify-content: center;" onclick="loadDemoScript('tavern')">📜 Tavern</button>
+                  <button class="btn-sm" style="flex: 1; height: 35px; justify-content: center;" onclick="loadDemoScript('heist')">⚡ Overlap Skit</button>
+                </div>
               </div>
             </div>
 
-            <div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 9px; padding: 8px 11px; font-size: 11px; color: #c7d2fe; flex-shrink: 0;">
-              <strong>🎬 How Scene Scripts Work:</strong> Write one turn per line as <code>Name (voice description): Dialogue</code>.
-              If <code>Name</code> is already in your <strong>Character Voice Locker</strong>, it automatically reuses their locked voice! If they are new, it designs their voice on their first line and locks them into the roster for all following lines.
+            <div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 9px; padding: 7px 11px; font-size: 10.5px; color: #c7d2fe; flex-shrink: 0;">
+              <strong>🎬 Low-Friction Game Skit Syntax:</strong> <code>Speaker (voice description) [1.25x, maya1, overlap 180ms]: Dialogue</code>.
+              Existing characters reuse their locked voice in 1 batch pass; new characters are designed &amp; locked on the fly! Use <code>[Overlap: 180ms]</code> for natural interruptions.
             </div>
 
             <div class="field-group grow">
               <div class="field-label">
                 <span>Multi-Character Scene Script</span>
-                <span class="field-hint">Supports <code>[Pause: 600ms]</code> between lines &amp; Maya-1 tags like <code>&lt;laugh&gt;</code></span>
+                <span class="field-hint">Supports <code>[Pause: 500ms]</code>, <code>[Overlap: 180ms]</code>, <code>[1.25x]</code> &amp; <code>[maya1]</code></span>
               </div>
               <textarea id="sceneScriptInput" style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;" placeholder="Torvin: Keep your coin, traveler. That blade was forged in the old fires.
 Nyx (sharp witty 28-year-old female rogue, crisp British accent, brisk pacing): Oh, come on Torvin! Everyone in this city has a price.
-[Pause: 450ms]
+[Pause: 350ms]
 Torvin: Not me, girl. Not for all the gold in the Citadel."></textarea>
             </div>
           </div>
@@ -1278,16 +1281,27 @@ Torvin: Not me, girl. Not for all the gold in the Citadel."></textarea>
       updateModelCardsUI();
     }
 
-    function loadDemoScript() {
+    function loadDemoScript(kind = 'tavern') {
+      if (kind === 'heist') {
+        document.getElementById('sceneTitleInput').value = 'Vault Laser Grid Interruption';
+        document.getElementById('sceneScriptInput').value = [
+          'Nyx (sharp witty 28-year-old female rogue, crisp British accent, brisk pacing) [1.20x]: The security relay is cycling down, just give me ten more seconds on this terminal—',
+          '[Overlap: 220ms]',
+          'Torvin [1.25x]: Ten seconds?! The iron golems are already Coming down the corridor!',
+          'Nyx [1.25x]: Relax, old man! Pull the red lever on my mark. Ready? Now!'
+        ].join('\n');
+        showToast('Loaded Overlap Skit (Nyx gets cut off mid-sentence with [Overlap: 220ms]!)');
+        return;
+      }
       document.getElementById('sceneTitleInput').value = 'Blacksmith Shop Confrontation';
       document.getElementById('sceneScriptInput').value = [
         'Torvin: Keep your coin, traveler. That blade was forged in the old fires, and nothing in these mountains is for sale anymore.',
         'Nyx (A sharp, witty 28-year-old female rogue with a sleek British accent, confident and sarcastic tone, brisk conversational pacing): Oh, come on Torvin! Everyone in this city has a price, even a stubborn old dwarf.',
-        '[Pause: 350ms]',
+        '[Pause: 300ms]',
         'Torvin: You think a bag of stolen silver buys steel like this? Get out of my forge before I call the iron guard.',
         'Nyx: Relax, old man. Keep the sword, I only came for the map hidden under your anvil.'
       ].join('\n');
-      showToast('Loaded multi-character demo script (Torvin is reused from locker, Nyx will be created & locked!)');
+      showToast('Loaded multi-character demo script (2-pass engine batching + auto character lock)');
     }
 
     function handlePrimaryAction() {
@@ -1393,19 +1407,83 @@ Torvin: Not me, girl. Not for all the gold in the Citadel."></textarea>
         <div class="item-card">
           <div class="item-header">
             <span class="item-title">🎬 ${escapeHtml(sc.title)}</span>
-            <span style="font-size: 10.5px; color: var(--text-dim);">${sc.line_count} lines • ${sc.duration_sec}s</span>
+            <span style="font-size: 10.5px; color: var(--text-dim);">${sc.line_count} lines • ${sc.duration_sec}s${sc.model_swaps !== undefined ? ` • ${sc.model_swaps} swap` : ''}</span>
           </div>
-          <div class="item-sub" style="margin-bottom: 6px;">
-            ${(sc.segments || []).map(seg => `<div><strong>${escapeHtml(seg.speaker)}</strong> (${seg.start_sec}s–${seg.end_sec}s): "${escapeHtml(seg.text)}"</div>`).join('')}
+          <div style="display: flex; flex-direction: column; gap: 4px; margin: 6px 0;">
+            ${(sc.segments || []).map(seg => `
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 11px; background: rgba(255,255,255,0.03); padding: 4px 7px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);">
+                <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;" title="${escapeHtml(seg.text)}">
+                  <strong style="color: #a5b4fc;">#${seg.index} ${escapeHtml(seg.speaker)}</strong>
+                  <span style="color: var(--text-dim); font-size: 10px;">(${seg.start_sec}s–${seg.end_sec}s${seg.pause_after_ms < 0 ? `, overlap ${Math.abs(seg.pause_after_ms)}ms` : ''})</span>:
+                  <span style="color: #e2e8f0;">"${escapeHtml(seg.text)}"</span>
+                </div>
+                <div style="display: flex; gap: 4px; flex-shrink: 0;">
+                  <button class="btn-sm" style="padding: 2px 6px; font-size: 10px;" title="Re-roll only this line and re-stitch scene" onclick='rerollSceneLine(${JSON.stringify(sc.id)}, ${seg.index})'>🔄 Re-Take</button>
+                  <button class="btn-sm" style="padding: 2px 6px; font-size: 10px;" title="Edit dialogue text or timing for this line and re-stitch" onclick='editSceneLine(${JSON.stringify(sc.id)}, ${seg.index})'>✏️</button>
+                </div>
+              </div>
+            `).join('')}
           </div>
-          <audio controls preload="none" src="${sc.url}"></audio>
+          <audio controls preload="none" src="${sc.url}?t=${encodeURIComponent(sc.elapsed_sec || 0)}"></audio>
           <div class="item-actions">
-            <button class="btn-sm" onclick='loadSceneById(${JSON.stringify(sc.id)})'>▶ Play in Monitor</button>
-            <a class="btn-sm emerald" href="${sc.url}" download="${sc.filename}">⬇ Master Scene WAV</a>
+            <button class="btn-sm" onclick='loadSceneById(${JSON.stringify(sc.id)})'>▶ Monitor</button>
+            <a class="btn-sm emerald" href="/api/scenes/${sc.id}/export.zip" download>📦 Game Bundle (.ZIP)</a>
+            <a class="btn-sm" href="/api/scenes/${sc.id}/subtitles.srt" download="${sc.id}.srt">📝 .SRT</a>
+            <a class="btn-sm" href="${sc.url}" download="${sc.filename}">⬇ Master WAV</a>
             <button class="btn-sm danger" onclick='deleteScene(${JSON.stringify(sc.id)})'>✕</button>
           </div>
         </div>
       `).join('');
+    }
+
+    async function rerollSceneLine(sceneId, lineIndex, customPayload = null) {
+      const sc = state.scenes.find(x => x.id === sceneId);
+      if (!sc) return;
+      const seg = (sc.segments || []).find(s => s.index === lineIndex);
+      if (!seg) return;
+
+      showToast(`🔄 Re-synthesizing Line #${lineIndex} (${seg.speaker}) & re-stitching master scene...`);
+      document.getElementById('statusDot').className = 'dot loading';
+      document.getElementById('statusText').textContent = `Re-rolling line #${lineIndex}...`;
+
+      try {
+        const body = customPayload || { line_index: lineIndex };
+        const res = await fetch(`/api/scenes/${sceneId}/reroll-line`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Re-roll failed');
+
+        const idx = state.scenes.findIndex(x => x.id === sceneId);
+        if (idx !== -1) state.scenes[idx] = data.scene;
+        if (data.takes) state.takes = data.takes;
+        if (data.status) updateStatusHeader(data.status);
+
+        renderTakes();
+        renderScenes();
+        loadSceneIntoMonitor(data.scene, true);
+        showToast(`✅ Re-rolled Line #${lineIndex} & updated master scene in ${data.scene.elapsed_sec}s!`);
+      } catch (err) {
+        showToast(`Re-roll error: ${err.message}`);
+        document.getElementById('statusDot').className = 'dot';
+        document.getElementById('statusText').textContent = 'Ready';
+      }
+    }
+
+    function editSceneLine(sceneId, lineIndex) {
+      const sc = state.scenes.find(x => x.id === sceneId);
+      if (!sc) return;
+      const seg = (sc.segments || []).find(s => s.index === lineIndex);
+      if (!seg) return;
+
+      const updatedText = window.prompt(`Edit Line #${lineIndex} (${seg.speaker}):`, seg.text);
+      if (updatedText === null || !updatedText.trim()) return;
+      rerollSceneLine(sceneId, lineIndex, {
+        line_index: lineIndex,
+        text: updatedText.trim(),
+      });
     }
 
     function loadSceneById(sceneId) {

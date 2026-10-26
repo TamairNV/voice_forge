@@ -29,31 +29,87 @@ from mlx_audio.lm.sample_utils import make_logits_processors, make_sampler
 from mlx_audio.utils import get_model_path, load_config, load_weights, apply_quantization, from_dict
 
 
+def normalize_studio_loudness(
+    audio_np: np.ndarray,
+    sr: int = 24000,
+    target_rms: float = 0.14,
+    peak_ceiling: float = 0.92,
+) -> np.ndarray:
+    """
+    Studio loudness normalizer & micro-fade processor:
+    - Removes DC offset
+    - Normalizes active speech RMS to `target_rms` (~-17 dBFS) so Qwen3 and Maya-1 match in volume
+    - Soft-limits peaks at `peak_ceiling` (-0.7 dBFS) so nothing clips
+    - Applies 12ms cosine fade-in / fade-out to eliminate boundary clicks when stitching skits
+    """
+    if audio_np.size == 0:
+        return audio_np
+
+    audio = audio_np.astype(np.float32)
+    audio = audio - float(np.mean(audio))
+
+    # Measure active RMS (ignoring near-silent frames)
+    abs_a = np.abs(audio)
+    active = audio[abs_a > 0.008]
+    ref = active if active.size > int(sr * 0.05) else audio
+    rms = float(np.sqrt(np.mean(ref ** 2))) + 1e-8
+
+    gain = target_rms / rms
+    gain = min(gain, 6.0)  # Avoid over-amplifying quiet breaths
+    audio = audio * gain
+
+    # Soft tanh saturation above 0.75 up to peak_ceiling
+    peak = float(np.max(np.abs(audio)))
+    if peak > peak_ceiling:
+        audio = np.tanh(audio / peak_ceiling) * peak_ceiling
+
+    # 12ms fade-in and fade-out for click-free skit stitching
+    fade_len = min(int(sr * 0.012), audio.shape[0] // 4)
+    if fade_len > 1:
+        fade_in = np.linspace(0.0, 1.0, fade_len, dtype=np.float32)
+        fade_out = np.linspace(1.0, 0.0, fade_len, dtype=np.float32)
+        audio[:fade_len] *= fade_in
+        audio[-fade_len:] *= fade_out
+
+    return audio
+
+
 def apply_studio_pacing(
     audio_np: np.ndarray,
     sr: int = 24000,
     speed: float = 1.0,
     trim_silence: bool = True,
+    normalize_audio: bool = True,
 ) -> np.ndarray:
     """
     Studio post-processor:
-    1. Tighten long awkward pauses (>260ms) down to snappy ~110ms conversational breaths.
+    1. Trim leading/trailing dead air and tighten long internal pauses (>240ms) down to snappy ~110ms breaths.
     2. Apply pitch-preserving SOLA time-stretching via ffmpeg `atempo` when speed != 1.0.
+    3. Normalize loudness and apply click-free micro-fades.
     """
     if audio_np.size == 0:
         return audio_np
 
-    # Step 1: Tighten dead-air pauses if enabled
+    # Step 1: Trim leading/trailing silence & tighten dead-air pauses if enabled
     if trim_silence:
         win = int(sr * 0.02)  # 20ms frame
-        if len(audio_np) > win * 10:
+        if len(audio_np) > win * 6:
             n_frames = len(audio_np) // win
             frames = audio_np[: n_frames * win].reshape(n_frames, win)
             rms = np.sqrt(np.mean(frames ** 2, axis=1))
-            thresh = max(0.004, float(np.percentile(rms, 15)) * 1.2)
+            thresh = max(0.004, float(np.percentile(rms, 15)) * 1.25)
             is_silent = rms < thresh
 
-            max_silent_frames = 6  # keep at most 120ms of consecutive silence
+            # Trim leading & trailing silence (keep 2 frames = 40ms padding)
+            non_silent_idx = np.where(~is_silent)[0]
+            if non_silent_idx.size > 0:
+                first_f = max(0, int(non_silent_idx[0]) - 2)
+                last_f = min(n_frames, int(non_silent_idx[-1]) + 3)
+                frames = frames[first_f:last_f]
+                is_silent = is_silent[first_f:last_f]
+                n_frames = frames.shape[0]
+
+            max_silent_frames = 6  # keep at most 120ms of consecutive internal silence
             keep_chunks = []
             silent_run = 0
             for idx in range(n_frames):
@@ -65,9 +121,6 @@ def apply_studio_pacing(
                     silent_run = 0
                     keep_chunks.append(frames[idx])
 
-            remainder = audio_np[n_frames * win :]
-            if remainder.size > 0:
-                keep_chunks.append(remainder)
             if keep_chunks:
                 audio_np = np.concatenate(keep_chunks, axis=0)
 
@@ -94,6 +147,9 @@ def apply_studio_pacing(
             if res.returncode == 0 and out_wav.exists():
                 stretched, _ = sf.read(str(out_wav), dtype="float32")
                 audio_np = stretched
+
+    if normalize_audio:
+        audio_np = normalize_studio_loudness(audio_np, sr=sr)
 
     return audio_np
 

@@ -242,3 +242,39 @@ curl -X POST http://127.0.0.1:7860/api/scenes/render \
   }'
 ```
 *(Want the stitched `.wav` file returned directly as binary audio? Send the exact same payload to `POST /api/scenes/render/wav` with `--output scene.wav`!)*
+
+---
+
+### Example 7: Low-Friction Game Skit Production Pipeline
+
+VoiceForge Studio includes specialized production features so you (or an LLM) can produce dozens of game skits with zero friction:
+
+1. **2-Pass Smart Model-Swap Batching**:
+   - **Pass 1 (Character Discovery & Voice Locking)**: Synthesizes the first line of any brand-new character using `qwen3_voicedesign` (or `maya1`) and immediately locks them into your Character Voice Locker.
+   - **Pass 2 (Zero-Swap Batch Dialogue Rendering)**: Groups all remaining lines across the skit by engine (`qwen3_clone`) so a 15-line conversation between 4 characters swaps models at most **once** instead of alternating on every line!
+2. **Broadcast Loudness Normalization & Click-Free Micro-Fades**:
+   - Every generated line is automatically RMS-normalized (~`-17 dBFS`) with a soft peak limiter (`-0.7 dBFS`) and `12ms` cosine fade-in/out so whispered lines, shouted lines, Qwen3-TTS lines, and Maya-1 lines match volume seamlessly when stitched.
+3. **Overlap / Interruption Timing & Inline Stage Directions**:
+   - Use negative `pause_after_ms` (e.g., `"pause_after_ms": -220` or `[Overlap: 220ms]` in `script_text`) so characters can cut each other off mid-sentence!
+   - Use bracketed inline stage directions per line in `script_text`:
+     ```text
+     Nyx [1.20x]: The security relay is cycling down, just give me ten more seconds—
+     [Overlap: 220ms]
+     Torvin [1.25x]: Ten seconds?! The iron golems are already coming down the corridor!
+     Nyx [maya1, 1.20x]: <laugh> Relax, old man! Pull the red lever now!
+     ```
+4. **Surgical Single-Line Re-Roll (`POST /api/scenes/{scene_id}/reroll-line`)**:
+   - If 1 line in a 10-line skit needs a fresh vocal take or a text tweak, re-synthesize **only that single line** and re-stitch the master `.wav` + `.srt` in ~2 seconds:
+     ```bash
+     curl -X POST http://127.0.0.1:7860/api/scenes/scene_123456/reroll-line \
+       -H "Content-Type: application/json" \
+       -d '{"line_index": 2, "text": "Relax, Torvin! I brought the royal key!", "speed": 1.25}'
+     ```
+5. **Batch Skit Queue (`POST /api/scenes/batch`)**:
+   - Pass `{ "scenes": [ ... ] }` to render multiple game skits in one call; characters created in Skit #1 are automatically reused in Skit #2..N.
+6. **One-Click Game Engine Cutscene Bundle (`GET /api/scenes/{scene_id}/export.zip`)**:
+   - Downloads a complete `.zip` archive ready for Unity, Unreal, or Godot containing:
+     - `master_scene.wav` (full stitched 24kHz audio)
+     - `subtitles.srt` (standard SubRip subtitle file with exact speaker timestamps)
+     - `manifest.json` (speaker IDs, character IDs, start/end timestamps, and stem paths)
+     - `lines/001_<speaker>.wav`, `002_<speaker>.wav`, ... (individual numbered line WAV stems for RPG dialogue boxes)

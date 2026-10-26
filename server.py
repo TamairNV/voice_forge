@@ -11,11 +11,13 @@ and external LLMs / AI agents / game engines can control every feature programma
   - Auto-generated OpenAPI / Swagger docs at `/docs` and `/openapi.json`
 """
 
+import io
 import json
 import re
 import shutil
 import time
 import uuid
+import zipfile
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -249,10 +251,21 @@ class SceneLineItem(BaseModel):
     )
     pause_after_ms: Optional[int] = Field(
         None,
-        ge=0,
+        ge=-2000,
         le=5000,
-        description="Silence gap in milliseconds after this line before the next character speaks (defaults to `default_pause_ms`).",
+        description="Gap in milliseconds after this line before the next character speaks. Positive values add silence; negative values (e.g. -200) overlap/interrupt the next speaker!",
     )
+
+
+class RerollSceneLineRequest(BaseModel):
+    """Surgically re-synthesize a single line in an existing scene and immediately re-stitch the master scene WAV + SRT subtitles."""
+    line_index: int = Field(..., ge=1, description="1-based line index in `scene.segments` to re-roll.")
+    text: Optional[str] = Field(None, description="Optional updated dialogue text for this line (defaults to existing text).")
+    instruct: Optional[str] = Field(None, description="Optional updated voice/acting instruction.")
+    model_id: Optional[str] = Field(None, description="Optional engine override ('qwen3_clone', 'qwen3_voicedesign', or 'maya1').")
+    speed: Optional[float] = Field(None, ge=0.5, le=2.0, description="Optional speaking speed multiplier for this line.")
+    pause_after_ms: Optional[int] = Field(None, ge=-2000, le=5000, description="Optional updated pause/overlap after this line in ms.")
+    temperature: Optional[float] = Field(None, description="Optional sampling temperature override for a fresh vocal take.")
 
 
 class SceneRenderRequest(BaseModel):
@@ -283,9 +296,9 @@ class SceneRenderRequest(BaseModel):
     )
     default_pause_ms: int = Field(
         280,
-        ge=0,
+        ge=-2000,
         le=5000,
-        description="Default silence gap (in ms) inserted between dialogue turns when stitching the scene.",
+        description="Default silence gap (or negative overlap in ms) inserted between dialogue turns when stitching the scene.",
     )
     speed: float = Field(
         1.15,
@@ -301,6 +314,11 @@ class SceneRenderRequest(BaseModel):
         True,
         description="Automatically lock any newly designed character into the persistent Character Voice Locker so their voice stays identical across the rest of the scene and future scenes.",
     )
+
+
+class BatchSceneRenderRequest(BaseModel):
+    """Render an entire batch of game skits / cutscenes in a single low-friction pipeline call."""
+    scenes: List[SceneRenderRequest] = Field(..., description="List of multi-character scenes/skits to render sequentially.")
 
 
 class StitchTakesRequest(BaseModel):
@@ -699,14 +717,15 @@ def api_delete_take(take_id: str):
 def _parse_script_text_to_lines(script_text: str) -> List[SceneLineItem]:
     """
     Parse human or LLM plain-text script lines into structured `SceneLineItem` objects.
-    Supports formats like:
+    Supports low-friction formats like:
       - `Torvin (gruff 60s Scottish dwarf blacksmith): Keep your coin, traveler.`
-      - `[Pause: 600ms]` (attaches pause to previous line)
-      - `Nyx: Oh, brilliant plan! <laugh> Let's walk right in.`
+      - `Nyx [maya1, 1.25x]: Oh, brilliant plan! <laugh> Let's walk right in.`
+      - `Guard (nervous young watchman) [fast, overlap 180ms]: Wait—don't touch that!`
+      - `[Pause: 600ms]` or `[Overlap: 200ms]` (attaches pause/overlap to previous line)
     """
     parsed: List[SceneLineItem] = []
-    line_pattern = re.compile(r"^\s*([^\(:]+?)(?:\s*\(([^\)]+)\))?\s*:\s*(.+)$")
-    pause_pattern = re.compile(r"^\s*\[?\s*pause\s*[:=]?\s*(\d+)\s*(?:ms)?\s*\]?\s*$", re.IGNORECASE)
+    line_pattern = re.compile(r"^\s*([^\(:\[]+?)(?:\s*\(([^\)]+)\))?(?:\s*\[([^\]]+)\])?\s*:\s*(.+)$")
+    pause_pattern = re.compile(r"^\s*\[?\s*(pause|overlap)\s*[:=]?\s*(-?\d+)\s*(?:ms)?\s*\]?\s*$", re.IGNORECASE)
 
     for raw_line in script_text.splitlines():
         s = raw_line.strip()
@@ -716,16 +735,56 @@ def _parse_script_text_to_lines(script_text: str) -> List[SceneLineItem]:
         pm = pause_pattern.match(s)
         if pm:
             if parsed:
-                parsed[-1].pause_after_ms = int(pm.group(1))
+                kind = pm.group(1).lower()
+                val = abs(int(pm.group(2)))
+                parsed[-1].pause_after_ms = -val if kind == "overlap" else val
             continue
 
         m = line_pattern.match(s)
         if m:
             speaker = m.group(1).strip()
             instruct = (m.group(2) or "").strip() or None
-            dialogue = m.group(3).strip()
+            directives = (m.group(3) or "").strip().lower()
+            dialogue = m.group(4).strip()
+
+            model_id = None
+            speed = None
+            pause_after_ms = None
+
+            if directives:
+                if "maya" in directives:
+                    model_id = "maya1"
+                elif "clone" in directives:
+                    model_id = "qwen3_clone"
+                elif "design" in directives or "qwen" in directives:
+                    model_id = "qwen3_voicedesign"
+
+                spd_m = re.search(r"(\d+(?:\.\d+)?)\s*x", directives)
+                if spd_m:
+                    speed = max(0.5, min(2.0, float(spd_m.group(1))))
+                elif "fast" in directives:
+                    speed = 1.30
+                elif "slow" in directives:
+                    speed = 0.92
+
+                ov_m = re.search(r"overlap\s*[:=]?\s*(\d+)", directives)
+                if ov_m:
+                    pause_after_ms = -abs(int(ov_m.group(1)))
+                ps_m = re.search(r"pause\s*[:=]?\s*(-?\d+)", directives)
+                if ps_m:
+                    pause_after_ms = int(ps_m.group(1))
+
             if dialogue:
-                parsed.append(SceneLineItem(speaker=speaker, text=dialogue, instruct=instruct))
+                parsed.append(
+                    SceneLineItem(
+                        speaker=speaker,
+                        text=dialogue,
+                        instruct=instruct,
+                        model_id=model_id,
+                        speed=speed,
+                        pause_after_ms=pause_after_ms,
+                    )
+                )
 
     return parsed
 
@@ -740,12 +799,141 @@ def _find_preset_instruct(speaker_name: str, for_maya: bool = False) -> Optional
     return None
 
 
-def _execute_scene_render(req: SceneRenderRequest) -> dict:
-    t_start = time.perf_counter()
-    lines = list(req.lines)
-    if not lines and req.script_text:
-        lines = _parse_script_text_to_lines(req.script_text)
+def _format_srt_timestamp(seconds: float) -> str:
+    ms_total = max(0, int(round(seconds * 1000)))
+    hours = ms_total // 3_600_000
+    ms_total %= 3_600_000
+    minutes = ms_total // 60_000
+    ms_total %= 60_000
+    secs = ms_total // 1000
+    millis = ms_total % 1000
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
+
+def _mix_segments_into_master(segment_records: List[dict], sample_rate: int = 24000) -> np.ndarray:
+    """
+    Mix and stitch ordered segment WAV files into a single master 24kHz timeline.
+    Supports both positive turn-taking pauses (`pause_after_ms >= 0`) AND negative
+    interruption overlaps (`pause_after_ms < 0`) so characters can cut each other off naturally!
+    Updates `start_sec` and `end_sec` in place on each segment record.
+    """
+    loaded_waves: List[np.ndarray] = []
+    starts_samples: List[int] = []
+    cursor_samples = 0
+
+    for idx, seg in enumerate(segment_records):
+        take_filename = Path(seg["take_url"]).name
+        wav_path = TAKES_DIR / take_filename
+        if not wav_path.exists():
+            audio = np.zeros(int(sample_rate * 0.2), dtype=np.float32)
+        else:
+            audio, sr = sf.read(str(wav_path), dtype="float32")
+            if audio.ndim > 1:
+                audio = audio.mean(axis=1)
+
+        start_sample = max(0, cursor_samples)
+        end_sample = start_sample + audio.shape[0]
+        starts_samples.append(start_sample)
+        loaded_waves.append(audio)
+
+        seg["duration_sec"] = round(audio.shape[0] / sample_rate, 2)
+        seg["start_sec"] = round(start_sample / sample_rate, 2)
+        seg["end_sec"] = round(end_sample / sample_rate, 2)
+
+        pause_ms = int(seg.get("pause_after_ms", 0) or 0) if idx < len(segment_records) - 1 else 0
+        seg["pause_after_ms"] = pause_ms
+        gap_samples = int(sample_rate * (pause_ms / 1000.0))
+        # Ensure the next line never starts before the current line's start + 100ms
+        cursor_samples = max(start_sample + int(sample_rate * 0.1), end_sample + gap_samples)
+
+    total_samples = 0
+    for start_s, wav in zip(starts_samples, loaded_waves):
+        total_samples = max(total_samples, start_s + wav.shape[0])
+
+    if total_samples == 0:
+        return np.zeros(int(sample_rate * 0.25), dtype=np.float32)
+
+    master = np.zeros(total_samples, dtype=np.float32)
+    for start_s, wav in zip(starts_samples, loaded_waves):
+        master[start_s : start_s + wav.shape[0]] += wav
+
+    peak = float(np.max(np.abs(master)))
+    if peak > 0.96:
+        master = (master / peak) * 0.94
+
+    return master.astype(np.float32)
+
+
+def _write_scene_package_files(scene_record: dict) -> None:
+    """
+    Generate companion `.srt` subtitles and `_manifest.json` game-engine dialogue metadata
+    alongside the stitched master `.wav` file for zero-friction Unity / Unreal / Godot import.
+    """
+    scene_id = scene_record["id"]
+    srt_lines: List[str] = []
+    for seg in scene_record.get("segments", []):
+        idx = seg["index"]
+        t0 = _format_srt_timestamp(seg["start_sec"])
+        t1 = _format_srt_timestamp(seg["end_sec"])
+        clean_text = re.sub(r"<[^>]+>", "", seg["text"]).strip() or seg["text"]
+        srt_lines.append(f"{idx}\n{t0} --> {t1}\n{seg['speaker']}: {clean_text}\n")
+
+    srt_filename = f"{scene_id}.srt"
+    srt_path = SCENES_DIR / srt_filename
+    srt_path.write_text("\n".join(srt_lines), encoding="utf-8")
+
+    manifest_filename = f"{scene_id}_manifest.json"
+    manifest_path = SCENES_DIR / manifest_filename
+
+    scene_record["srt_url"] = f"/audio/scenes/{srt_filename}"
+    scene_record["manifest_url"] = f"/audio/scenes/{manifest_filename}"
+    scene_record["bundle_zip_url"] = f"/api/scenes/{scene_id}/export.zip"
+
+    manifest_payload = {
+        "scene_id": scene_id,
+        "title": scene_record["title"],
+        "sample_rate": 24000,
+        "duration_sec": scene_record["duration_sec"],
+        "line_count": scene_record["line_count"],
+        "master_audio_file": scene_record["filename"],
+        "subtitles_file": srt_filename,
+        "cast": scene_record.get("cast", []),
+        "dialogue_lines": [
+            {
+                "index": seg["index"],
+                "speaker": seg["speaker"],
+                "character_id": seg.get("character_id"),
+                "text": seg["text"],
+                "clean_subtitle_text": re.sub(r"<[^>]+>", "", seg["text"]).strip() or seg["text"],
+                "start_sec": seg["start_sec"],
+                "end_sec": seg["end_sec"],
+                "duration_sec": seg["duration_sec"],
+                "pause_after_ms": seg.get("pause_after_ms", 0),
+                "stem_file": f"lines/{seg['index']:03d}_{re.sub(r'[^a-zA-Z0-9_-]', '_', seg['speaker'].lower())}.wav",
+                "take_id": seg["take_id"],
+                "take_url": seg["take_url"],
+            }
+            for seg in scene_record.get("segments", [])
+        ],
+    }
+    _write_json(manifest_path, manifest_payload)
+
+
+def _execute_scene_render(req: SceneRenderRequest) -> dict:
+    """
+    2-Pass Smart Model-Swap Scene Director:
+      - Pass 1 (New Character Discovery & Voice Locking): Synthesizes the first line of any brand-new
+        character using `qwen3_voicedesign` (or `maya1`), locks their voice into `CHARACTERS_JSON`,
+        and caches that first line's audio take so it isn't synthesized twice.
+      - Pass 2 (Zero-Swap Batch Dialogue Rendering): Groups all remaining lines by engine (`qwen3_clone` vs `maya1`)
+        so a 15-line skit between 4 characters swaps models at most ONCE instead of alternating on every line!
+    """
+    t_start = time.perf_counter()
+    raw_lines = list(req.lines)
+    if not raw_lines and req.script_text:
+        raw_lines = _parse_script_text_to_lines(req.script_text)
+
+    lines = [l for l in raw_lines if l.text and l.text.strip()]
     if not lines:
         raise HTTPException(
             status_code=400,
@@ -758,126 +946,176 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
         if item.instruct and item.speaker.strip().lower() not in cast_descriptions:
             cast_descriptions[item.speaker.strip().lower()] = item.instruct.strip()
 
-    stitched_chunks: List[np.ndarray] = []
-    segment_records: List[dict] = []
+    pre_rendered_takes: Dict[int, tuple] = {}
+    resolved_cast_map: Dict[str, dict] = {}
     cast_summary: Dict[str, dict] = {}
-    sample_rate = 24000
+    model_swaps = 0
+    last_used_model = engine.active_model_id
 
+    # -------------------------------------------------------------------------
+    # PASS 1: Discover brand-new characters, batch by design engine, and lock!
+    # -------------------------------------------------------------------------
+    new_speaker_first_line: Dict[str, int] = {}
     for idx, line in enumerate(lines):
         speaker = line.speaker.strip()
-        text = line.text.strip()
-        if not text:
-            continue
-
-        line_speed = line.speed if line.speed is not None else req.speed
-        pause_ms = line.pause_after_ms if line.pause_after_ms is not None else req.default_pause_ms
+        s_key = speaker.lower()
         existing_char = _resolve_character(speaker)
-        explicit_model = line.model_id
+        if existing_char is not None:
+            resolved_cast_map[s_key] = existing_char
+        elif s_key not in new_speaker_first_line:
+            new_speaker_first_line[s_key] = idx
 
-        # Case 1: Speaker wants Maya-1 inline acting explicitly
-        if explicit_model == "maya1":
-            instruct = (
-                line.instruct
-                or cast_descriptions.get(speaker.lower())
-                or (existing_char["description"] if existing_char else None)
-                or _find_preset_instruct(speaker, for_maya=True)
-                or f"Expressive character voice for {speaker}, clear diction, natural conversational pacing."
-            )
-            take = _run_synthesis_and_save(
-                SynthesizeRequest(
-                    model_id="maya1",
-                    text=text,
-                    instruct=instruct,
-                    speed=line_speed,
-                    trim_silence=req.trim_silence,
-                )
-            )
-            action = "reused_character_with_maya1" if existing_char else "designed_with_maya1"
-            if not existing_char and req.auto_lock_new_characters:
-                locked = api_save_character_from_take(
-                    SaveCharacterFromTakeRequest(take_id=take["id"], name=speaker, description=instruct)
-                )["character"]
-                existing_char = locked
-                action = "created_and_locked"
+    # Sort new character discovery lines by design engine so we don't swap back and forth
+    def _design_engine_for_line(idx: int) -> str:
+        l = lines[idx]
+        if l.model_id in ("maya1", "qwen3_voicedesign"):
+            return l.model_id
+        return "maya1" if ("<" in l.text and ">" in l.text) else "qwen3_voicedesign"
 
-        # Case 2: Character already exists in the Character Voice Locker -> Reuse with Qwen3 Base Clone (100% consistent!)
-        elif existing_char is not None:
+    discovery_indices = sorted(new_speaker_first_line.values(), key=_design_engine_for_line)
+    for idx in discovery_indices:
+        line = lines[idx]
+        speaker = line.speaker.strip()
+        s_key = speaker.lower()
+        design_engine = _design_engine_for_line(idx)
+        line_speed = line.speed if line.speed is not None else req.speed
+        instruct = (
+            line.instruct
+            or cast_descriptions.get(s_key)
+            or _find_preset_instruct(speaker, for_maya=(design_engine == "maya1"))
+            or f"Distinctive studio game character voice for {speaker}, clear diction, natural conversational pacing."
+        )
+        if design_engine != last_used_model:
+            model_swaps += 1
+            last_used_model = design_engine
+
+        take = _run_synthesis_and_save(
+            SynthesizeRequest(
+                model_id=design_engine,
+                text=line.text.strip(),
+                instruct=instruct,
+                speed=line_speed,
+                trim_silence=req.trim_silence,
+            )
+        )
+        action = "designed_new_voice"
+        locked_char = None
+        if req.auto_lock_new_characters:
+            locked_char = api_save_character_from_take(
+                SaveCharacterFromTakeRequest(take_id=take["id"], name=speaker, description=instruct)
+            )["character"]
+            resolved_cast_map[s_key] = locked_char
+            take["character_id"] = locked_char["id"]
+            take["character_name"] = locked_char["name"]
+            action = "created_and_locked"
+
+        pre_rendered_takes[idx] = (take, action, locked_char, instruct, line_speed)
+
+    # -------------------------------------------------------------------------
+    # PASS 2: Batch-render all remaining lines grouped by engine (`qwen3_clone` vs `maya1`)
+    # -------------------------------------------------------------------------
+    remaining_indices = [i for i in range(len(lines)) if i not in pre_rendered_takes]
+
+    def _target_engine_for_remaining(idx: int) -> str:
+        l = lines[idx]
+        s_key = l.speaker.strip().lower()
+        has_locked = (s_key in resolved_cast_map) or (_resolve_character(l.speaker.strip()) is not None)
+        if l.model_id == "maya1":
+            return "maya1"
+        if l.model_id == "qwen3_voicedesign":
+            return "qwen3_voicedesign"
+        if has_locked:
+            return "qwen3_clone"
+        return "maya1" if ("<" in l.text and ">" in l.text) else "qwen3_voicedesign"
+
+    # Prefer rendering whichever engine is ALREADY loaded in VRAM first!
+    def _sort_key_for_remaining(idx: int):
+        eng = _target_engine_for_remaining(idx)
+        return (0 if eng == last_used_model else 1, eng, idx)
+
+    for idx in sorted(remaining_indices, key=_sort_key_for_remaining):
+        line = lines[idx]
+        speaker = line.speaker.strip()
+        s_key = speaker.lower()
+        target_eng = _target_engine_for_remaining(idx)
+        line_speed = line.speed if line.speed is not None else req.speed
+        existing_char = resolved_cast_map.get(s_key) or _resolve_character(speaker)
+
+        if target_eng != last_used_model:
+            model_swaps += 1
+            last_used_model = target_eng
+
+        if target_eng == "qwen3_clone" and existing_char is not None:
             take = _run_synthesis_and_save(
                 SynthesizeRequest(
                     model_id="qwen3_clone",
                     character_id=existing_char["id"],
-                    text=text,
+                    text=line.text.strip(),
                     speed=line_speed,
                     trim_silence=req.trim_silence,
                 )
             )
             action = "reused_locked_character"
-
-        # Case 3: Brand-new character -> Design voice from description & auto-lock into Character Voice Locker
+            instruct = existing_char.get("description", "")
         else:
             instruct = (
                 line.instruct
-                or cast_descriptions.get(speaker.lower())
-                or _find_preset_instruct(speaker, for_maya=False)
-                or f"Distinctive studio game character voice for {speaker}, clear diction, natural conversational pacing."
+                or cast_descriptions.get(s_key)
+                or (existing_char["description"] if existing_char else None)
+                or _find_preset_instruct(speaker, for_maya=(target_eng == "maya1"))
+                or f"Expressive character voice for {speaker}, clear diction, natural conversational pacing."
             )
-            design_engine = "maya1" if ("<" in text and ">" in text) else "qwen3_voicedesign"
             take = _run_synthesis_and_save(
                 SynthesizeRequest(
-                    model_id=design_engine,
-                    text=text,
+                    model_id=target_eng,
+                    text=line.text.strip(),
                     instruct=instruct,
                     speed=line_speed,
                     trim_silence=req.trim_silence,
                 )
             )
-            action = "designed_new_voice"
-            if req.auto_lock_new_characters:
-                locked = api_save_character_from_take(
-                    SaveCharacterFromTakeRequest(take_id=take["id"], name=speaker, description=instruct)
-                )["character"]
-                existing_char = locked
-                take["character_id"] = locked["id"]
-                take["character_name"] = locked["name"]
-                action = "created_and_locked"
+            action = "reused_character_with_maya1" if existing_char else f"designed_with_{target_eng}"
 
-        # Load generated segment audio for stitching
-        seg_audio, seg_sr = sf.read(take["file_path"], dtype="float32")
-        sample_rate = seg_sr
-        start_sec = sum(c.shape[0] for c in stitched_chunks) / sample_rate
-        stitched_chunks.append(seg_audio)
-        end_sec = sum(c.shape[0] for c in stitched_chunks) / sample_rate
+        pre_rendered_takes[idx] = (take, action, existing_char, instruct, line_speed)
 
-        # Add silence gap between turns (except after the final line)
-        if idx < len(lines) - 1 and pause_ms > 0:
-            silence_samples = int(sample_rate * (pause_ms / 1000.0))
-            stitched_chunks.append(np.zeros(silence_samples, dtype=np.float32))
+    # -------------------------------------------------------------------------
+    # Assemble ordered segments, mix overlaps/pauses, and export package files
+    # -------------------------------------------------------------------------
+    segment_records: List[dict] = []
+    for idx, line in enumerate(lines):
+        speaker = line.speaker.strip()
+        s_key = speaker.lower()
+        take, action, char_obj, instruct_used, line_speed = pre_rendered_takes[idx]
+        pause_ms = line.pause_after_ms if line.pause_after_ms is not None else req.default_pause_ms
 
-        cast_summary[speaker] = {
-            "speaker": speaker,
-            "character_id": existing_char["id"] if existing_char else None,
-            "status": action,
-            "description": existing_char["description"] if existing_char else (line.instruct or cast_descriptions.get(speaker.lower(), "")),
-        }
+        if speaker not in cast_summary or action == "created_and_locked":
+            cast_summary[speaker] = {
+                "speaker": speaker,
+                "character_id": char_obj["id"] if char_obj else None,
+                "status": action,
+                "description": char_obj["description"] if char_obj else instruct_used,
+            }
 
         segment_records.append({
             "index": idx + 1,
             "speaker": speaker,
-            "character_id": existing_char["id"] if existing_char else None,
+            "character_id": char_obj["id"] if char_obj else None,
+            "model_id": take["model_id"],
             "action": action,
-            "text": text,
+            "text": line.text.strip(),
+            "instruct": instruct_used,
+            "speed": line_speed,
             "take_id": take["id"],
             "take_url": take["url"],
             "duration_sec": take["metrics"]["duration_sec"],
-            "start_sec": round(start_sec, 2),
-            "end_sec": round(end_sec, 2),
+            "start_sec": 0.0,
+            "end_sec": 0.0,
             "pause_after_ms": pause_ms if idx < len(lines) - 1 else 0,
         })
 
-    if not stitched_chunks:
-        raise HTTPException(status_code=400, detail="No valid dialogue segments were synthesized.")
+    sample_rate = 24000
+    master_audio = _mix_segments_into_master(segment_records, sample_rate=sample_rate)
 
-    master_audio = np.concatenate(stitched_chunks, axis=0)
     scene_id = f"scene_{int(time.time())}_{uuid.uuid4().hex[:6]}"
     scene_filename = f"{scene_id}.wav"
     scene_filepath = SCENES_DIR / scene_filename
@@ -894,11 +1132,14 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
         "url": f"/audio/scenes/{scene_filename}",
         "duration_sec": total_duration,
         "elapsed_sec": elapsed_sec,
+        "model_swaps": model_swaps,
         "line_count": len(segment_records),
         "cast": list(cast_summary.values()),
         "segments": segment_records,
         "created_at": time.strftime("%H:%M:%S"),
     }
+
+    _write_scene_package_files(scene_record)
 
     scenes = _read_json(SCENES_JSON, [])
     scenes.insert(0, scene_record)
@@ -909,11 +1150,11 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
 @app.post("/api/scenes/render", tags=["Multi-Character Scene Director"])
 def api_render_scene(req: SceneRenderRequest):
     """
-    Render a complete multi-character script into a stitched master `.wav` scene:
-    - Reuses existing characters by name from the Character Voice Locker (`qwen3_clone`).
-    - Automatically designs and locks brand-new characters when first encountered (`auto_lock_new_characters=True`).
-    - Synthesizes every line and stitches them together with configurable turn-taking silence (`default_pause_ms` or per-line `pause_after_ms`).
-    - Returns the master scene URL, file path, timeline timestamps (`start_sec`/`end_sec`), and individual segment URLs.
+    Render a complete multi-character script into a stitched master `.wav` scene using 2-Pass Smart Model-Swap Batching:
+    - Pass 1: Discovers any brand-new characters, designs their voice from `instruct`, and locks them into the Character Locker.
+    - Pass 2: Batch-renders all locked character lines together with `qwen3_clone` to minimize VRAM model swaps.
+    - Supports positive silence pauses (`pause_after_ms > 0`) AND negative interruption overlaps (`pause_after_ms < 0`).
+    - Automatically exports `.srt` subtitles, `_manifest.json`, and a 1-click `.zip` Game Engine Cutscene Bundle.
     """
     scene_record = _execute_scene_render(req)
     return {
@@ -922,6 +1163,161 @@ def api_render_scene(req: SceneRenderRequest):
         "takes": _read_json(TAKES_JSON, [])[:40],
         "status": engine.get_status(),
     }
+
+
+@app.post("/api/scenes/batch", tags=["Multi-Character Scene Director"])
+def api_render_scenes_batch(req: BatchSceneRenderRequest):
+    """
+    Low-friction batch skit pipeline: render multiple game skits / cutscenes in a single API call.
+    Characters created and locked in Skit #1 are automatically reused in Skit #2..N!
+    """
+    t0 = time.perf_counter()
+    rendered_scenes = []
+    for s_req in req.scenes:
+        rendered_scenes.append(_execute_scene_render(s_req))
+    return {
+        "count": len(rendered_scenes),
+        "total_elapsed_sec": round(time.perf_counter() - t0, 2),
+        "scenes": rendered_scenes,
+        "characters": _read_json(CHARACTERS_JSON, []),
+        "status": engine.get_status(),
+    }
+
+
+@app.post("/api/scenes/{scene_id}/reroll-line", tags=["Multi-Character Scene Director"])
+def api_reroll_scene_line(scene_id: str, req: RerollSceneLineRequest):
+    """
+    Surgically re-roll (or edit the text/speed/pause/engine of) a single line in an existing scene
+    without re-generating the rest of the skit! Immediately re-mixes the master `.wav` and updates `.srt` & `manifest.json`.
+    """
+    t0 = time.perf_counter()
+    scenes = _read_json(SCENES_JSON, [])
+    scene = next((s for s in scenes if s["id"] == scene_id), None)
+    if not scene:
+        raise HTTPException(status_code=404, detail=f"Scene '{scene_id}' not found.")
+
+    segments = scene.get("segments", [])
+    target_seg = next((seg for seg in segments if seg["index"] == req.line_index), None)
+    if not target_seg:
+        raise HTTPException(status_code=404, detail=f"Line index {req.line_index} not found in scene '{scene_id}'.")
+
+    speaker = target_seg["speaker"]
+    new_text = (req.text if req.text is not None else target_seg["text"]).strip()
+    new_speed = req.speed if req.speed is not None else float(target_seg.get("speed", 1.15))
+    char_obj = _resolve_character(target_seg.get("character_id") or speaker)
+
+    model_id = req.model_id or target_seg.get("model_id") or ("qwen3_clone" if char_obj else "qwen3_voicedesign")
+    instruct = (
+        req.instruct
+        or target_seg.get("instruct")
+        or (char_obj["description"] if char_obj else "")
+        or f"Expressive game character voice for {speaker}."
+    )
+
+    synth_req = SynthesizeRequest(
+        model_id=model_id,
+        text=new_text,
+        instruct=instruct,
+        character_id=char_obj["id"] if (model_id == "qwen3_clone" and char_obj) else None,
+        speed=new_speed,
+        temperature=req.temperature,
+    )
+    new_take = _run_synthesis_and_save(synth_req)
+
+    target_seg["text"] = new_text
+    target_seg["instruct"] = instruct
+    target_seg["model_id"] = model_id
+    target_seg["speed"] = new_speed
+    target_seg["take_id"] = new_take["id"]
+    target_seg["take_url"] = new_take["url"]
+    target_seg["action"] = f"rerolled_with_{model_id}"
+    if req.pause_after_ms is not None:
+        target_seg["pause_after_ms"] = req.pause_after_ms
+
+    sample_rate = 24000
+    master_audio = _mix_segments_into_master(segments, sample_rate=sample_rate)
+    scene_filepath = SCENES_DIR / scene["filename"]
+    sf.write(str(scene_filepath), master_audio, sample_rate, subtype="PCM_16")
+
+    scene["duration_sec"] = round(master_audio.shape[0] / sample_rate, 2)
+    scene["elapsed_sec"] = round(time.perf_counter() - t0, 2)
+    _write_scene_package_files(scene)
+    _write_json(SCENES_JSON, scenes)
+
+    return {
+        "scene": scene,
+        "rerolled_segment": target_seg,
+        "new_take": new_take,
+        "takes": _read_json(TAKES_JSON, [])[:40],
+        "status": engine.get_status(),
+    }
+
+
+@app.get("/api/scenes/{scene_id}/export.zip", tags=["Multi-Character Scene Director"])
+def api_export_scene_zip(scene_id: str):
+    """
+    Download a complete, ready-to-import Game Engine Cutscene Bundle (`.zip`) containing:
+      - `master_scene.wav` (24kHz loudness-normalized master audio)
+      - `subtitles.srt` (SubRip subtitle file with exact speaker timestamps)
+      - `manifest.json` (Unity / Unreal / Godot JSON dialogue cue sheet)
+      - `lines/001_<speaker>.wav`, `002_<speaker>.wav`, ... (individual numbered line stems)
+    """
+    scenes = _read_json(SCENES_JSON, [])
+    scene = next((s for s in scenes if s["id"] == scene_id), None)
+    if not scene:
+        raise HTTPException(status_code=404, detail=f"Scene '{scene_id}' not found.")
+
+    # Ensure .srt and _manifest.json are up to date on disk
+    _write_scene_package_files(scene)
+
+    zip_path = SCENES_DIR / f"{scene_id}_bundle.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        master_wav = SCENES_DIR / scene["filename"]
+        if master_wav.exists():
+            zf.write(master_wav, arcname="master_scene.wav")
+        srt_file = SCENES_DIR / f"{scene_id}.srt"
+        if srt_file.exists():
+            zf.write(srt_file, arcname="subtitles.srt")
+        manifest_file = SCENES_DIR / f"{scene_id}_manifest.json"
+        if manifest_file.exists():
+            zf.write(manifest_file, arcname="manifest.json")
+
+        for seg in scene.get("segments", []):
+            take_file = TAKES_DIR / Path(seg["take_url"]).name
+            if take_file.exists():
+                safe_spk = re.sub(r"[^a-zA-Z0-9_-]", "_", seg["speaker"].lower())
+                zf.write(take_file, arcname=f"lines/{seg['index']:03d}_{safe_spk}.wav")
+
+    safe_title = re.sub(r"[^a-zA-Z0-9_-]", "_", scene.get("title", scene_id).lower()).strip("_") or scene_id
+    return FileResponse(
+        path=str(zip_path),
+        media_type="application/zip",
+        filename=f"{safe_title}_{scene_id}.zip",
+    )
+
+
+@app.get("/api/scenes/{scene_id}/subtitles.srt", tags=["Multi-Character Scene Director"])
+def api_get_scene_srt(scene_id: str):
+    """Download the `.srt` SubRip subtitle file for a rendered scene."""
+    scenes = _read_json(SCENES_JSON, [])
+    scene = next((s for s in scenes if s["id"] == scene_id), None)
+    if not scene:
+        raise HTTPException(status_code=404, detail=f"Scene '{scene_id}' not found.")
+    _write_scene_package_files(scene)
+    srt_path = SCENES_DIR / f"{scene_id}.srt"
+    return FileResponse(path=str(srt_path), media_type="text/plain; charset=utf-8", filename=f"{scene_id}.srt")
+
+
+@app.get("/api/scenes/{scene_id}/manifest.json", tags=["Multi-Character Scene Director"])
+def api_get_scene_manifest(scene_id: str):
+    """Download the game-engine dialogue manifest JSON for a rendered scene."""
+    scenes = _read_json(SCENES_JSON, [])
+    scene = next((s for s in scenes if s["id"] == scene_id), None)
+    if not scene:
+        raise HTTPException(status_code=404, detail=f"Scene '{scene_id}' not found.")
+    _write_scene_package_files(scene)
+    manifest_path = SCENES_DIR / f"{scene_id}_manifest.json"
+    return _read_json(manifest_path, {})
 
 
 @app.post("/api/scenes/render/wav", tags=["Multi-Character Scene Director"])
@@ -944,10 +1340,7 @@ def api_stitch_existing_takes(req: StitchTakesRequest):
     takes = _read_json(TAKES_JSON, [])
     take_map = {t["id"]: t for t in takes}
 
-    chunks: List[np.ndarray] = []
     segments: List[dict] = []
-    sr = 24000
-
     for idx, tid in enumerate(req.take_ids):
         t = take_map.get(tid)
         if not t:
@@ -956,28 +1349,26 @@ def api_stitch_existing_takes(req: StitchTakesRequest):
         if not wav_path.exists():
             raise HTTPException(status_code=404, detail=f"Audio file for take '{tid}' missing.")
 
-        audio, sr = sf.read(str(wav_path), dtype="float32")
-        start_sec = sum(c.shape[0] for c in chunks) / sr
-        chunks.append(audio)
-        end_sec = sum(c.shape[0] for c in chunks) / sr
-
-        if idx < len(req.take_ids) - 1 and req.pause_ms > 0:
-            chunks.append(np.zeros(int(sr * (req.pause_ms / 1000.0)), dtype=np.float32))
-
         segments.append({
             "index": idx + 1,
             "speaker": t.get("character_name") or t.get("model_name"),
+            "character_id": t.get("character_id"),
+            "model_id": t.get("model_id", "qwen3_voicedesign"),
+            "action": "stitched_take",
             "text": t.get("text", ""),
             "take_id": tid,
             "take_url": t["url"],
-            "start_sec": round(start_sec, 2),
-            "end_sec": round(end_sec, 2),
+            "duration_sec": t.get("metrics", {}).get("duration_sec", 0.0),
+            "start_sec": 0.0,
+            "end_sec": 0.0,
+            "pause_after_ms": req.pause_ms if idx < len(req.take_ids) - 1 else 0,
         })
 
-    if not chunks:
+    if not segments:
         raise HTTPException(status_code=400, detail="No takes provided to stitch.")
 
-    master = np.concatenate(chunks, axis=0)
+    sr = 24000
+    master = _mix_segments_into_master(segments, sample_rate=sr)
     scene_id = f"scene_{int(time.time())}_{uuid.uuid4().hex[:6]}"
     scene_filename = f"{scene_id}.wav"
     scene_filepath = SCENES_DIR / scene_filename
@@ -991,11 +1382,14 @@ def api_stitch_existing_takes(req: StitchTakesRequest):
         "url": f"/audio/scenes/{scene_filename}",
         "duration_sec": round(master.shape[0] / sr, 2),
         "elapsed_sec": 0.05,
+        "model_swaps": 0,
         "line_count": len(segments),
         "cast": [],
         "segments": segments,
         "created_at": time.strftime("%H:%M:%S"),
     }
+
+    _write_scene_package_files(scene_record)
 
     scenes = _read_json(SCENES_JSON, [])
     scenes.insert(0, scene_record)

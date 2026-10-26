@@ -153,6 +153,63 @@ class VoiceForgeClient:
             self.download_take(scene["url"], output_wav)
         return scene
 
+    def render_scenes_batch(self, scenes: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Render multiple multi-character skits/cutscenes in a single low-friction batch call.
+        Characters created & locked in earlier skits are automatically reused in subsequent skits!
+        """
+        return self._request_json("POST", "/api/scenes/batch", {"scenes": scenes})
+
+    def reroll_scene_line(
+        self,
+        scene_id: str,
+        line_index: int,
+        text: Optional[str] = None,
+        instruct: Optional[str] = None,
+        model_id: Optional[str] = None,
+        speed: Optional[float] = None,
+        pause_after_ms: Optional[int] = None,
+        temperature: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """
+        Surgically re-roll (or edit the text/speed/pause/engine of) a single line `line_index` (1-based)
+        in an existing scene and immediately re-stitch the master `.wav`, `.srt`, and `manifest.json`.
+        """
+        payload = {"line_index": line_index}
+        if text is not None:
+            payload["text"] = text
+        if instruct is not None:
+            payload["instruct"] = instruct
+        if model_id is not None:
+            payload["model_id"] = model_id
+        if speed is not None:
+            payload["speed"] = speed
+        if pause_after_ms is not None:
+            payload["pause_after_ms"] = pause_after_ms
+        if temperature is not None:
+            payload["temperature"] = temperature
+        return self._request_json("POST", f"/api/scenes/{scene_id}/reroll-line", payload)["scene"]
+
+    def download_scene_bundle(self, scene_id: str, dest_zip_path: Union[str, Path]) -> Path:
+        """
+        Download a complete Game Engine Cutscene Bundle (`.zip`) containing:
+          - `master_scene.wav`
+          - `subtitles.srt`
+          - `manifest.json`
+          - `lines/001_<speaker>.wav`, `002_<speaker>.wav`, ...
+        """
+        return self.download_take(f"/api/scenes/{scene_id}/export.zip", dest_zip_path)
+
+    def get_scene_subtitles_srt(self, scene_id: str) -> str:
+        """Fetch the SubRip (`.srt`) subtitle file content for a rendered scene."""
+        url = f"{self.base_url}/api/scenes/{scene_id}/subtitles.srt"
+        with urllib.request.urlopen(url, timeout=30) as resp:
+            return resp.read().decode("utf-8")
+
+    def get_scene_manifest(self, scene_id: str) -> Dict[str, Any]:
+        """Fetch the Unity / Unreal / Godot dialogue manifest JSON for a rendered scene."""
+        return self._request_json("GET", f"/api/scenes/{scene_id}/manifest.json")
+
     def stitch_takes(
         self,
         take_ids: List[str],
