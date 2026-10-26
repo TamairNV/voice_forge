@@ -71,7 +71,7 @@ TRIGGER: walking, phone call
     )
     print(f"   -> Saved: {scene_orig['file_path']} ({scene_orig['duration_sec']}s)")
     for seg in scene_orig["segments"]:
-        print(f"      Line #{seg['index']} [{seg['model_id']}]: pitch={seg.get('pitch_hz_median')}Hz ({seg.get('voice_register')}) | \"{seg['text']}\"")
+        print(f"      Line #{seg['index']} [{seg['model_id']}, chained={seg.get('context_chained')}]: pitch={seg.get('pitch_hz_median')}Hz ({seg.get('voice_register')}) | \"{seg['text']}\"")
 
     # 3. Render Version 2: Punched-Up / Improved Game Skit Writing (Pure 1.0x, RVQ Timbre Locked Qwen3 Voice)
     improved_skit_qwen = """
@@ -103,7 +103,7 @@ TRIGGER: walking, loud speakerphone call in public
     )
     print(f"   -> Saved: {scene_improved['file_path']} ({scene_improved['duration_sec']}s)")
     for seg in scene_improved["segments"]:
-        print(f"      Line #{seg['index']} [{seg['model_id']}]: pitch={seg.get('pitch_hz_median')}Hz ({seg.get('voice_register')}) | \"{seg['text']}\"")
+        print(f"      Line #{seg['index']} [{seg['model_id']}, chained={seg.get('context_chained')}]: pitch={seg.get('pitch_hz_median')}Hz ({seg.get('voice_register')}) | \"{seg['text']}\"")
 
     # 4. Render Version 3: Hybrid Scene (Locked Qwen3 Clone for dialogue + SNAC Voice-Locked Maya-1 for <gasp>/<snort> lines)
     karen_base_maya = (
@@ -156,7 +156,7 @@ TRIGGER: walking, loud speakerphone call in public
     )
     print(f"   -> Saved: {scene_maya['file_path']} ({scene_maya['duration_sec']}s)")
     for seg in scene_maya["segments"]:
-        print(f"      Line #{seg['index']} [{seg['model_id']}]: pitch={seg.get('pitch_hz_median')}Hz ({seg.get('voice_register')}) | \"{seg['text']}\"")
+        print(f"      Line #{seg['index']} [{seg['model_id']}, chained={seg.get('context_chained')}]: pitch={seg.get('pitch_hz_median')}Hz ({seg.get('voice_register')}) | \"{seg['text']}\"")
 
 
 if __name__ == "__main__":

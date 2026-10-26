@@ -191,6 +191,18 @@ class SynthesizeRequest(BaseModel):
         None,
         description="ID or exact name of a locked character from `/api/characters` when using `model_id='qwen3_clone'` (or for Maya-1 SNAC reference locking).",
     )
+    prev_take_id: Optional[str] = Field(
+        None,
+        description="Optional ID of the preceding dialogue take (`take_id`) to chain into the ICL reference context so this line knows how the previous line sounded and what it said!",
+    )
+    prev_audio_path: Optional[str] = Field(
+        None,
+        description="Optional path to preceding line's WAV file for context chaining.",
+    )
+    prev_text: Optional[str] = Field(
+        None,
+        description="Optional transcript of the preceding line for context chaining.",
+    )
 
 
 class DesignAndLockRequest(BaseModel):
@@ -359,6 +371,13 @@ class SceneRenderRequest(BaseModel):
     auto_lock_new_characters: bool = Field(
         True,
         description="Automatically lock any newly designed character into the persistent Character Voice Locker so their voice stays identical across the rest of the scene and future scenes.",
+    )
+    context_continuity: bool = Field(
+        True,
+        description=(
+            "Enable Rolling Audio+Text Context Chaining: each line sees both the character's permanent Golden Reference "
+            "AND the immediately preceding line's audio + transcript so pitch, cadence, and conversational flow carry over naturally!"
+        ),
     )
 
 
@@ -541,6 +560,15 @@ def _run_synthesis_and_save(req: SynthesizeRequest) -> dict:
             detail="Please provide `character_id` (or character name) from `/api/characters` when using `qwen3_clone`.",
         )
 
+    prev_audio_path = req.prev_audio_path
+    prev_text = req.prev_text
+    if req.prev_take_id and not prev_audio_path:
+        takes = _read_json(TAKES_JSON, [])
+        pt = next((t for t in takes if t["id"] == req.prev_take_id), None)
+        if pt:
+            prev_audio_path = str(TAKES_DIR / pt["filename"])
+            prev_text = pt.get("text", "")
+
     try:
         audio_np, sr, metrics = engine.synthesize(
             model_id=req.model_id,
@@ -555,6 +583,8 @@ def _run_synthesis_and_save(req: SynthesizeRequest) -> dict:
             seed=req.seed,
             ref_audio_path=ref_audio_path,
             ref_text=ref_text,
+            prev_audio_path=prev_audio_path,
+            prev_text=prev_text,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1276,6 +1306,17 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
         line_seed = line.seed if line.seed is not None else req.seed
         existing_char = resolved_cast_map.get(s_key) or _resolve_character(speaker)
 
+        # Rolling Audio+Text Context Chaining: find this character's most recent previous rendered line in the skit!
+        prev_audio_path = None
+        prev_text = None
+        if req.context_continuity:
+            for prev_idx in range(idx - 1, -1, -1):
+                if prev_idx in pre_rendered_takes and lines[prev_idx].speaker.strip().lower() == s_key:
+                    prev_take_obj = pre_rendered_takes[prev_idx][0]
+                    prev_audio_path = prev_take_obj.get("file_path") or str(TAKES_DIR / prev_take_obj["filename"])
+                    prev_text = lines[prev_idx].text.strip()
+                    break
+
         if target_eng != last_used_model:
             model_swaps += 1
             last_used_model = target_eng
@@ -1292,18 +1333,29 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
                     top_p=line_top_p,
                     repetition_penalty=line_rep,
                     seed=line_seed,
+                    prev_audio_path=prev_audio_path,
+                    prev_text=prev_text,
                 )
             )
-            action = "reused_locked_character"
+            action = "reused_locked_character_context_chained" if prev_audio_path else "reused_locked_character"
             instruct = existing_char.get("description", "")
         else:
-            instruct = (
+            # Also enrich `instruct` with the immediately preceding line in the scene (even if spoken by another speaker!)
+            scene_prev_context = ""
+            if req.context_continuity and idx > 0:
+                prev_line_item = lines[idx - 1]
+                prev_clean = re.sub(r"<[^>]+>", "", prev_line_item.text).strip()
+                if prev_clean:
+                    scene_prev_context = f", responding directly to the previous line ('{prev_clean[:80]}')"
+
+            base_instruct = (
                 line.instruct
                 or cast_descriptions.get(s_key)
                 or (existing_char["description"] if existing_char else None)
                 or _find_preset_instruct(speaker, for_maya=(target_eng == "maya1"))
                 or f"Expressive character voice for {speaker}, clear diction, natural conversational pacing."
             )
+            instruct = f"{base_instruct.rstrip('.')}{scene_prev_context}."
             take = _run_synthesis_and_save(
                 SynthesizeRequest(
                     model_id=target_eng,
@@ -1316,6 +1368,8 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
                     top_p=line_top_p,
                     repetition_penalty=line_rep,
                     seed=line_seed,
+                    prev_audio_path=prev_audio_path,
+                    prev_text=prev_text,
                 )
             )
             action = "reused_character_with_maya1" if existing_char else f"designed_with_{target_eng}"
@@ -1346,6 +1400,7 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
             "character_id": char_obj["id"] if char_obj else None,
             "model_id": take["model_id"],
             "action": action,
+            "context_chained": bool(take["metrics"].get("context_chained", False)),
             "text": line.text.strip(),
             "instruct": instruct_used,
             "speed": line_speed,
@@ -1460,6 +1515,13 @@ def api_reroll_scene_line(scene_id: str, req: RerollSceneLineRequest):
         or f"Expressive game character voice for {speaker}."
     )
 
+    # Find the character's preceding line in the scene so re-rolls preserve exact context continuity!
+    prev_take_id = None
+    for seg in reversed(segments):
+        if seg["index"] < req.line_index and seg["speaker"].strip().lower() == speaker.strip().lower():
+            prev_take_id = seg.get("take_id")
+            break
+
     synth_req = SynthesizeRequest(
         model_id=model_id,
         text=new_text,
@@ -1470,6 +1532,7 @@ def api_reroll_scene_line(scene_id: str, req: RerollSceneLineRequest):
         top_p=req.top_p,
         repetition_penalty=req.repetition_penalty,
         seed=req.seed,
+        prev_take_id=prev_take_id,
     )
     new_take = _run_synthesis_and_save(synth_req)
 

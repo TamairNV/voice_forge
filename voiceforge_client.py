@@ -20,8 +20,12 @@ class VoiceForgeClient:
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
         headers = {"Content-Type": "application/json"} if payload is not None else {}
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
-        with urllib.request.urlopen(req, timeout=180) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        try:
+            with urllib.request.urlopen(req, timeout=180) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"HTTP {e.code} on {path}: {err_body}") from e
 
     def status(self) -> Dict[str, Any]:
         """Get full studio status, active model, VRAM telemetry, characters, and takes."""
@@ -146,10 +150,12 @@ class VoiceForgeClient:
         top_p: Optional[float] = None,
         repetition_penalty: Optional[float] = None,
         seed: Optional[int] = None,
+        prev_take_id: Optional[str] = None,
         output_wav: Optional[Union[str, Path]] = None,
     ) -> Dict[str, Any]:
         """
         Speak a new dialogue line using a locked NPC character voice (`qwen3_clone`) with zero vocal drift.
+        Pass `prev_take_id` to chain the previous line's audio + transcript into the context window!
         """
         payload: Dict[str, Any] = {
             "model_id": "qwen3_clone",
@@ -166,6 +172,8 @@ class VoiceForgeClient:
             payload["repetition_penalty"] = repetition_penalty
         if seed is not None:
             payload["seed"] = seed
+        if prev_take_id is not None:
+            payload["prev_take_id"] = prev_take_id
         res = self._request_json("POST", "/api/synthesize", payload)
         if output_wav:
             self.download_take(res["take"]["url"], output_wav)
@@ -185,12 +193,14 @@ class VoiceForgeClient:
         repetition_penalty: Optional[float] = None,
         seed: Optional[int] = None,
         auto_lock_new_characters: bool = True,
+        context_continuity: bool = True,
         output_wav: Optional[Union[str, Path]] = None,
     ) -> Dict[str, Any]:
         """
         Render a multi-character script into a stitched 24kHz `.wav` scene:
         - Automatically reuses existing locked characters by name (`qwen3_clone`).
         - Automatically designs & locks brand-new characters when first encountered (`auto_lock_new_characters=True`).
+        - Chains each character's previous line audio + transcript (`context_continuity=True`) so lines flow naturally!
         - Synthesizes each line and stitches them together with `default_pause_ms` (or per-line `pause_after_ms`).
         """
         payload: Dict[str, Any] = {
@@ -202,6 +212,7 @@ class VoiceForgeClient:
             "speed": speed,
             "trim_silence": trim_silence,
             "auto_lock_new_characters": auto_lock_new_characters,
+            "context_continuity": context_continuity,
         }
         if temperature is not None:
             payload["temperature"] = temperature

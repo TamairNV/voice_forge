@@ -646,12 +646,16 @@ class Maya1MLXRunner:
             packed.extend([s0, s1, s2, s3, s4, s5, s6])
         return packed
 
-    def encode_reference_audio_tokens(self, ref_audio_path: str, max_ref_sec: float = 4.5) -> List[int]:
+    def encode_reference_audio_tokens(self, ref_audio_source: Any, max_ref_sec: float = 5.5) -> List[int]:
         """
-        Encodes a saved Character Voice `.wav` into Maya-1 7-slot SNAC tokens so Maya-1 can
-        continue the exact speaker's voice while still executing `<laugh>`, `<sigh>`, `<gasp>` tags!
+        Encodes a saved Character Voice `.wav` (or numpy array) into Maya-1 7-slot SNAC tokens so Maya-1 can
+        continue the exact speaker's voice (and previous line's context) while executing `<laugh>`, `<sigh>`, `<gasp>` tags!
         """
-        audio_np, sr = sf.read(ref_audio_path, dtype="float32")
+        if isinstance(ref_audio_source, np.ndarray):
+            audio_np = ref_audio_source.astype(np.float32)
+            sr = self.sample_rate
+        else:
+            audio_np, sr = sf.read(str(ref_audio_source), dtype="float32")
         if audio_np.ndim > 1:
             audio_np = audio_np.mean(axis=1)
         if sr != self.sample_rate and audio_np.size > 0:
@@ -665,7 +669,8 @@ class Maya1MLXRunner:
             ).astype(np.float32)
         max_samples = int(max_ref_sec * self.sample_rate)
         if audio_np.shape[0] > max_samples:
-            audio_np = audio_np[:max_samples]
+            # Keep the most recent `max_ref_sec` seconds so any chained previous line stays intact!
+            audio_np = audio_np[-max_samples:]
         audio_mx = mx.array(audio_np, dtype=mx.float32)[None, None, :]
         codes = self.snac.encode(audio_mx)
         mx.eval(codes)
@@ -680,20 +685,32 @@ class Maya1MLXRunner:
         top_p: float = 0.9,
         repetition_penalty: float = 1.15,
         max_tokens: int = 2048,
-        ref_audio_path: Optional[str] = None,
+        ref_audio_path: Optional[Any] = None,
         ref_text: Optional[str] = None,
     ) -> Tuple[np.ndarray, Dict[str, Any]]:
         t0 = time.perf_counter()
         ref_snac_tokens: List[int] = []
         ref_frames: int = 0
 
-        if ref_audio_path and ref_text and Path(ref_audio_path).exists():
-            # Trim reference text slightly if we cap reference audio to 4.5s, or use full short ref
-            audio_info = sf.info(ref_audio_path)
-            if audio_info.duration <= 6.5:
-                ref_snac_tokens = self.encode_reference_audio_tokens(ref_audio_path, max_ref_sec=6.5)
+        has_valid_ref = (
+            ref_audio_path is not None
+            and ref_text
+            and (isinstance(ref_audio_path, np.ndarray) or Path(str(ref_audio_path)).exists())
+        )
+        if has_valid_ref:
+            ref_dur = (
+                ref_audio_path.shape[0] / self.sample_rate
+                if isinstance(ref_audio_path, np.ndarray)
+                else sf.info(str(ref_audio_path)).duration
+            )
+            if ref_dur <= 6.5:
+                raw_snac = self.encode_reference_audio_tokens(ref_audio_path, max_ref_sec=6.5)
+                # Trim trailing 2 SNAC frames (silence tail) so Maya-1 doesn't immediately emit CODE_END_TOKEN_ID!
+                if len(raw_snac) > 28:
+                    raw_snac = raw_snac[:-14]
+                ref_snac_tokens = raw_snac
                 ref_frames = len(ref_snac_tokens) // SNAC_TOKENS_PER_FRAME
-                combined_text = f"{ref_text.strip()} {text.strip()}"
+                combined_text = f"{ref_text.strip().rstrip('.!?')}, {text.strip()}"
                 prompt_str = self.build_prompt(instruct, combined_text)
             else:
                 prompt_str = self.build_prompt(instruct, text)
@@ -722,8 +739,11 @@ class Maya1MLXRunner:
             logits_processors=logits_processors,
         ):
             tok = int(resp.token)
-            if tok == CODE_END_TOKEN_ID and len(generated_ids) >= 28:
-                break
+            if tok == CODE_END_TOKEN_ID:
+                if len(generated_ids) >= 28:
+                    break
+                # Ignore premature EOS before 4 SNAC frames (28 tokens)
+                continue
             generated_ids.append(tok)
             if len(generated_ids) % 100 == 0:
                 mx.clear_cache()
@@ -803,6 +823,52 @@ def _install_qwen3_timbre_lock(model: Any) -> None:
     model._sample_token = _timbre_locked_sample_token
     model._lock_rvq_timbre = True
     talker._timbre_lock_installed = True
+
+
+def _build_rolling_context_reference(
+    golden_audio_path: Optional[str],
+    golden_text: Optional[str],
+    prev_audio_path: Optional[str],
+    prev_text: Optional[str],
+    sample_rate: int = 24000,
+    max_golden_sec: float = 5.5,
+    max_prev_sec: float = 5.0,
+) -> Tuple[Optional[mx.array], Optional[str], Optional[np.ndarray]]:
+    """
+    Builds a Hybrid Context-Aware Reference `(ref_audio_mx, combined_ref_text, ref_audio_np)` that combines:
+      1. The character's permanent Golden Reference Anchor (so vocal cords/timbre never drift over 20+ lines)
+      2. A 140ms natural micro-pause
+      3. The immediately preceding dialogue line's audio + transcript (`prev_audio_path` + `prev_text`)
+    When fed into `Qwen3-TTS Base` (or `Maya-1` SNAC prefix), the transformer literally hears AND reads
+    what the character just said in Line N-1 before speaking Line N, creating seamless conversational
+    prosody, pitch continuity, and emotional momentum!
+    """
+    if not golden_audio_path or not golden_text or not Path(golden_audio_path).exists():
+        return None, None, None
+
+    g_wav, g_sr = sf.read(golden_audio_path, dtype="float32")
+    if g_wav.ndim > 1:
+        g_wav = g_wav.mean(axis=1)
+    g_text = golden_text.strip()
+
+    if not prev_audio_path or not prev_text or not Path(prev_audio_path).exists():
+        return mx.array(g_wav, dtype=mx.float32), g_text, g_wav
+
+    p_wav, p_sr = sf.read(prev_audio_path, dtype="float32")
+    if p_wav.ndim > 1:
+        p_wav = p_wav.mean(axis=1)
+    p_text = prev_text.strip()
+
+    # Cap golden anchor to ~5.5s if combining with previous line so total ICL context stays in the 8-11s sweet spot
+    max_p_samples = int(max_prev_sec * sample_rate)
+    if p_wav.shape[0] > max_p_samples:
+        # Keep the trailing end of the previous line (most relevant to the transition into the next line)
+        p_wav = p_wav[-max_p_samples:]
+
+    gap = np.zeros(int(0.14 * sample_rate), dtype=np.float32)
+    combined_np = np.concatenate([g_wav, gap, p_wav], axis=0).astype(np.float32)
+    combined_text = f"{g_text} {p_text}".strip()
+    return mx.array(combined_np, dtype=mx.float32), combined_text, combined_np
 
 
 def _derive_deterministic_seed(key_str: str) -> int:
@@ -886,6 +952,8 @@ class VoiceForgeEngine:
         seed: Optional[int] = None,
         ref_audio_path: Optional[str] = None,
         ref_text: Optional[str] = None,
+        prev_audio_path: Optional[str] = None,
+        prev_text: Optional[str] = None,
     ) -> Tuple[np.ndarray, int, Dict[str, Any]]:
         # Ensure requested model is active
         if self.active_model_id != model_id or self.active_model is None:
@@ -906,21 +974,39 @@ class VoiceForgeEngine:
             if effective_seed is not None:
                 mx.random.seed(int(effective_seed))
 
+            # Build Hybrid Context-Aware Reference (Golden Anchor + Previous Line Audio/Text) when available!
+            clean_ref_text = None
+            if ref_text:
+                clean_ref_text, _ = sanitize_dialogue_for_model(ref_text, model_id="qwen3_clone")
+            clean_prev_text = None
+            if prev_text:
+                clean_prev_text, _ = sanitize_dialogue_for_model(prev_text, model_id="qwen3_clone")
+
+            ref_audio_mx, combined_ref_text, ref_audio_np = _build_rolling_context_reference(
+                golden_audio_path=ref_audio_path,
+                golden_text=clean_ref_text,
+                prev_audio_path=prev_audio_path,
+                prev_text=clean_prev_text,
+                sample_rate=24000,
+            )
+            used_prev_context = bool(prev_audio_path and clean_prev_text and ref_audio_mx is not None)
+
             if info["family"] == "maya1":
                 temp = temperature if temperature is not None else 0.42
                 tp = top_p if top_p is not None else 0.88
                 rp = repetition_penalty if repetition_penalty is not None else 1.15
-                clean_ref_text = None
-                if ref_text:
-                    clean_ref_text, _ = sanitize_dialogue_for_model(ref_text, model_id="qwen3_clone")
+                # For Maya-1 SNAC prefix, use the immediately preceding line if available (3-5s),
+                # or the Golden Reference if <= 6.5s, so `ref_text` and `ref_audio` stay 100% aligned!
+                maya_ref_src = prev_audio_path if (prev_audio_path and clean_prev_text) else ref_audio_path
+                maya_ref_txt = clean_prev_text if (prev_audio_path and clean_prev_text) else clean_ref_text
                 audio_np, metrics = self.active_model.generate(
                     text=clean_text,
                     instruct=compiled_instruct,
                     temperature=temp,
                     top_p=tp,
                     repetition_penalty=rp,
-                    ref_audio_path=ref_audio_path,
-                    ref_text=clean_ref_text,
+                    ref_audio_path=maya_ref_src,
+                    ref_text=maya_ref_txt,
                 )
                 audio_np = apply_studio_pacing(audio_np, 24000, speed=speed, trim_silence=trim_silence)
                 acoustics = analyze_voice_acoustics(audio_np, 24000, clean_text)
@@ -930,6 +1016,7 @@ class VoiceForgeEngine:
                 metrics["temperature"] = round(temp, 2)
                 metrics["top_p"] = round(tp, 2)
                 metrics["seed"] = effective_seed
+                metrics["context_chained"] = used_prev_context
                 metrics["compiled_instruct"] = compiled_instruct
                 return audio_np, 24000, metrics
 
@@ -959,12 +1046,13 @@ class VoiceForgeEngine:
                 self.active_model._lock_rvq_timbre = True
                 if not ref_audio_path or not ref_text:
                     raise ValueError("Voice Lock / Clone mode requires selecting a saved character voice (reference audio + transcript).")
-                clean_ref_text, _ = sanitize_dialogue_for_model(ref_text, model_id="qwen3_clone")
+                effective_ref_audio = ref_audio_mx if ref_audio_mx is not None else ref_audio_path
+                effective_ref_text = combined_ref_text if combined_ref_text else clean_ref_text
                 results = list(
                     self.active_model.generate(
                         text=clean_text,
-                        ref_audio=ref_audio_path,
-                        ref_text=clean_ref_text,
+                        ref_audio=effective_ref_audio,
+                        ref_text=effective_ref_text,
                         lang_code=language,
                         temperature=temp,
                         top_p=tp,
@@ -996,6 +1084,7 @@ class VoiceForgeEngine:
                 "top_p": round(tp, 2),
                 "seed": effective_seed,
                 "rvq_timbre_locked": bool(getattr(self.active_model, "_lock_rvq_timbre", False)),
+                "context_chained": used_prev_context,
                 "compiled_instruct": compiled_instruct,
                 "peak_memory_gb": round(mx.get_peak_memory() / 1e9, 2),
             }
