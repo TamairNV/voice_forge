@@ -844,6 +844,9 @@
       </div>
 
       <div class="telemetry-bar">
+        <button class="btn-sm emerald" style="padding: 5px 10px;" onclick="copyLLMSystemPrompt()" title="Copy the full LLM System Prompt & Prompt Engineering Guide to clipboard">
+          🤖 Copy LLM System Prompt
+        </button>
         <div class="pill">
           <span id="statusDot" class="dot"></span>
           <span id="statusText">Ready</span>
@@ -950,9 +953,14 @@
             <div class="field-group" id="voiceDescGroup">
               <div class="field-label">
                 <span>Person & Voice Description</span>
-                <span class="field-hint">Age, gender, accent, vocal texture, pitch & attitude</span>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <button class="btn-sm emerald" style="padding: 2px 8px; font-size: 10px;" onclick="optimizeVoicePrompt()" title="Expand a short character idea into the full 7-Dimension Qwen3 / Maya-1 acoustic formula">
+                    ✨ Auto-Optimize Prompt (7-Dimension)
+                  </button>
+                  <span class="field-hint">Age, gender, accent, timbre, pitch &amp; pace</span>
+                </div>
               </div>
-              <textarea id="instructInput" rows="2" placeholder="Describe the person and their voice..."></textarea>
+              <textarea id="instructInput" rows="2" placeholder="Type a rough idea (e.g. 'grumpy Scottish dwarf' or 'flirty board game rival') and click ✨ Auto-Optimize..."></textarea>
               <div class="trait-pills">
                 <span class="trait-pill" style="border-color: rgba(16,185,129,0.45); color: #6ee7b7;" onclick="setPacingTrait('fast brisk conversational pacing, snappy delivery')">⚡ Fast & Snappy Pacing</span>
                 <span class="trait-pill" style="border-color: rgba(16,185,129,0.45); color: #6ee7b7;" onclick="setPacingTrait('urgent rapid-fire speaking pace')">🔥 Rapid & Urgent</span>
@@ -1635,6 +1643,46 @@ Torvin: Not me, girl. Not for all the gold in the Citadel."></textarea>
         box.value = cur.slice(0, -1) + `, ${trait}.`;
       } else {
         box.value = `${cur}, ${trait}`;
+      }
+    }
+
+    async function optimizeVoicePrompt() {
+      const box = document.getElementById('instructInput');
+      const concept = box.value.trim();
+      if (!concept) {
+        showToast('Type a brief character idea first (e.g., "sketchy cyberpunk merchant")!');
+        return;
+      }
+      try {
+        const res = await fetch('/api/prompts/optimize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            concept,
+            model_id: state.selectedModelId,
+            dialogue_text: document.getElementById('dialogueInput').value.trim(),
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Prompt optimization failed');
+        box.value = state.selectedModelId === 'maya1' ? data.instruct_maya : data.instruct_qwen;
+        if (!document.getElementById('dialogueInput').value.trim()) {
+          document.getElementById('dialogueInput').value = state.selectedModelId === 'maya1' ? data.golden_sample_maya : data.golden_sample_qwen;
+        }
+        showToast('✨ Expanded into full 7-Dimension Studio Voice Prompt!');
+      } catch (e) {
+        showToast(`Optimize error: ${e.message}`);
+      }
+    }
+
+    async function copyLLMSystemPrompt() {
+      try {
+        const res = await fetch('/api/llm-guide');
+        const data = await res.json();
+        await navigator.clipboard.writeText(data.system_prompt_markdown || JSON.stringify(data, null, 2));
+        showToast('🤖 Copied full LLM System Prompt & Prompt Engineering Guide to clipboard!');
+      } catch (e) {
+        showToast(`Copy failed: ${e.message}`);
       }
     }
 

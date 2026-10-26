@@ -27,6 +27,29 @@ class VoiceForgeClient:
         """Get full studio status, active model, VRAM telemetry, characters, and takes."""
         return self._request_json("GET", "/api/status")
 
+    def get_llm_guide(self) -> Dict[str, Any]:
+        """Fetch the full LLM System Prompt, 7-Dimension Qwen3 formula, Maya-1 `<description>` rules, and script syntax."""
+        return self._request_json("GET", "/api/llm-guide")
+
+    def optimize_prompt(
+        self,
+        concept: str,
+        name: str = "Character",
+        model_id: str = "qwen3_voicedesign",
+        dialogue_text: str = "",
+    ) -> Dict[str, Any]:
+        """Expand a brief character idea into research-optimized Qwen3-TTS (7-Dimension) and Maya-1 (`<description>`) prompts."""
+        return self._request_json(
+            "POST",
+            "/api/prompts/optimize",
+            {
+                "concept": concept,
+                "name": name,
+                "model_id": model_id,
+                "dialogue_text": dialogue_text,
+            },
+        )
+
     def list_models(self) -> List[Dict[str, Any]]:
         """List available TTS engines ('qwen3_voicedesign', 'maya1', 'qwen3_clone')."""
         return self._request_json("GET", "/api/models")["models"]

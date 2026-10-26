@@ -29,7 +29,14 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from engine import VoiceForgeEngine, MODEL_REGISTRY, MAYA1_EMOTION_TAGS
+from engine import (
+    VoiceForgeEngine,
+    MODEL_REGISTRY,
+    MAYA1_EMOTION_TAGS,
+    compile_voice_instruct,
+    sanitize_dialogue_for_model,
+    optimize_character_prompts,
+)
 
 BASE_DIR = Path(__file__).parent.resolve()
 DATA_DIR = BASE_DIR / "data"
@@ -328,9 +335,71 @@ class StitchTakesRequest(BaseModel):
     pause_ms: int = Field(280, ge=0, le=5000, description="Silence gap in milliseconds between takes.")
 
 
+class OptimizePromptRequest(BaseModel):
+    """Expand a brief or rough character concept into research-engineered Qwen3-TTS (7-Dimension) and Maya-1 (`<description>`) prompts."""
+    concept: str = Field(
+        ...,
+        description="Short or rough character description (e.g., 'grumpy Scottish dwarf blacksmith', 'flirty board game rival', 'sinister cyberpunk AI').",
+    )
+    name: str = Field("Character", description="Optional character name.")
+    model_id: str = Field("qwen3_voicedesign", description="Target engine ('qwen3_voicedesign' or 'maya1').")
+    dialogue_text: str = Field("", description="Optional dialogue text to sanitize/optimize for the ear.")
+
+
 # ============================================================================
-# Core Discovery & Status Endpoints
+# Core Discovery, Prompt Engineering & LLM System Guide Endpoints
 # ============================================================================
+
+@app.get("/api/llm-guide", tags=["System & Discovery"])
+def api_llm_guide():
+    """
+    Returns the complete LLM System Prompt, Prompt Engineering Formulas (Qwen3 7-Dimension Formula,
+    Maya-1 `<description>` template & 20 inline tags, Qwen3 Base 10-15s Golden Reference rules),
+    and Skit Script syntax so any external LLM agent can self-configure in one GET call.
+    """
+    guide_path = BASE_DIR / "LLM_PROMPT_GUIDE.md"
+    markdown_guide = guide_path.read_text(encoding="utf-8") if guide_path.exists() else ""
+    return {
+        "system_prompt_markdown": markdown_guide,
+        "qwen3_voicedesign_formula": (
+            "[1. Persona & Delivery Style] + [2. Gender & Age Bracket] + [3. Accent] + "
+            "[4. Pitch & Register] + [5. Vocal Texture & Timbre] + [6. Pace & Rhythm] + [7. Studio Use Case]"
+        ),
+        "maya1_description_formula": (
+            "[Archetype/Role], [Male/Female] voice in their [20s/30s/40s/50s/60s] with a [Accent] accent, "
+            "[very low/low/medium/high] pitch, [gravelly/smooth/husky/clear/raspy] timbre, "
+            "[brisk/conversational/measured/fast] pacing, [emotion] tone at [low/medium/high] intensity."
+        ),
+        "qwen3_clone_golden_reference_rules": {
+            "optimal_duration_sec": "8 to 14 seconds (20-35 words)",
+            "verbatim_ref_text": "Must match spoken reference audio 100% word-for-word with zero <tags>.",
+        },
+        "maya1_supported_tags": [t["tag"] for t in MAYA1_EMOTION_TAGS],
+        "script_syntax_examples": [
+            "Torvin (cynical 60s Scottish dwarf blacksmith, deep gravelly baritone): Keep your coin, traveler.",
+            "Nyx (sharp witty 28yo female rogue, sleek British accent, medium-low husky pitch) [1.20x]: Oh, come on Torvin—",
+            "[Overlap: 220ms]",
+            "Torvin [1.25x]: Not for all the gold in the Citadel!",
+            "Nyx [maya1, 1.20x]: <laugh> Fine, keep the sword. I only came for the map.",
+        ],
+    }
+
+
+@app.post("/api/prompts/optimize", tags=["System & Discovery"])
+def api_optimize_prompt(req: OptimizePromptRequest):
+    """
+    Auto-engineer a short character concept into high-performing Qwen3-TTS VoiceDesign (7-Dimension)
+    and Maya-1 (`<description>`) prompts, plus a 10-second phonetically balanced Golden Reference sample.
+    """
+    bundle = optimize_character_prompts(req.concept, name=req.name)
+    clean_text, extracted_tags = sanitize_dialogue_for_model(req.dialogue_text, model_id=req.model_id)
+    compiled_active = compile_voice_instruct(req.concept, model_id=req.model_id, extracted_tags=extracted_tags)
+    return {
+        **bundle,
+        "compiled_for_active_model": compiled_active,
+        "sanitized_dialogue_text": clean_text,
+        "extracted_tags": extracted_tags,
+    }
 
 @app.get("/api/health", tags=["System & Discovery"])
 def api_health():
@@ -985,6 +1054,39 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
             or _find_preset_instruct(speaker, for_maya=(design_engine == "maya1"))
             or f"Distinctive studio game character voice for {speaker}, clear diction, natural conversational pacing."
         )
+
+        first_line_text = line.text.strip()
+        has_inline_tags = "<" in first_line_text and ">" in first_line_text
+        # Qwen3-TTS Base ICL cloning works best with an 8-14s (50-220 char) tag-free reference clip.
+        # If the character's first line in the skit is too short (<50 chars) or has <tags>,
+        # synthesize a dedicated 9-second Golden Reference Anchor to lock their voice cleanly!
+        needs_golden_anchor = req.auto_lock_new_characters and (len(first_line_text) < 50 or has_inline_tags)
+
+        if needs_golden_anchor:
+            anchor_engine = "qwen3_voicedesign"
+            if anchor_engine != last_used_model:
+                model_swaps += 1
+                last_used_model = anchor_engine
+            anchor_text = (
+                "Keep your eyes sharp, friend. Nothing in this place is what it seems, "
+                "and if we want to make it out before sunrise, you had better stick right beside me."
+            )
+            anchor_take = _run_synthesis_and_save(
+                SynthesizeRequest(
+                    model_id=anchor_engine,
+                    text=anchor_text,
+                    instruct=instruct,
+                    speed=req.speed,
+                    trim_silence=True,
+                )
+            )
+            locked_char = api_save_character_from_take(
+                SaveCharacterFromTakeRequest(take_id=anchor_take["id"], name=speaker, description=instruct)
+            )["character"]
+            resolved_cast_map[s_key] = locked_char
+            # Leave `idx` out of `pre_rendered_takes` so Pass 2 renders Line #1 using the locked voice!
+            continue
+
         if design_engine != last_used_model:
             model_swaps += 1
             last_used_model = design_engine
@@ -992,7 +1094,7 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
         take = _run_synthesis_and_save(
             SynthesizeRequest(
                 model_id=design_engine,
-                text=line.text.strip(),
+                text=first_line_text,
                 instruct=instruct,
                 speed=line_speed,
                 trim_silence=req.trim_silence,

@@ -8,6 +8,7 @@ Supports hot-swapping between:
 
 import gc
 import json
+import re
 import subprocess
 import tempfile
 import time
@@ -222,6 +223,227 @@ MAYA1_EMOTION_TAGS = [
     {"tag": "<scream>", "label": "Scream", "category": "Style"},
     {"tag": "<sing>", "label": "Sing", "category": "Style"},
 ]
+
+VALID_MAYA1_TAG_SET = {t["tag"] for t in MAYA1_EMOTION_TAGS}
+
+# Common LLM / writer variations mapped to official Maya-1 SNAC tags
+MAYA1_TAG_ALIASES = {
+    "laughs": "<laugh>",
+    "laughing": "<laugh>",
+    "chuckles": "<chuckle>",
+    "chuckling": "<chuckle>",
+    "giggles": "<giggle>",
+    "giggling": "<giggle>",
+    "sighs": "<sigh>",
+    "sighing": "<sigh>",
+    "exhales": "<exhale>",
+    "gasps": "<gasp>",
+    "gasping": "<gasp>",
+    "gulps": "<gulp>",
+    "snorts": "<snort>",
+    "whispers": "<whisper>",
+    "whispering": "<whisper>",
+    "cries": "<cry>",
+    "crying": "<cry>",
+    "screams": "<scream>",
+    "screaming": "<scream>",
+    "sings": "<sing>",
+    "singing": "<sing>",
+}
+
+# Maps inline tags to natural-language delivery descriptors when routed to Qwen3-TTS
+TAG_TO_QWEN_INSTRUCT = {
+    "<whisper>": "hushed intimate whisper delivery",
+    "<angry>": "fierce angry intense tone",
+    "<sarcastic>": "dry sarcastic biting tone",
+    "<mischievous>": "playful mischievous tone",
+    "<excited>": "high-energy excited enthusiastic tone",
+    "<curious>": "inquisitive curious inflections",
+    "<disappointed>": "weary disappointed tone",
+    "<appalled>": "shocked appalled tone",
+    "<cry>": "emotional trembling tearful delivery",
+    "<scream>": "urgent raised shouting delivery",
+    "<laugh>": "warm amused chuckling delivery",
+    "<chuckle>": "warm amused chuckling delivery",
+    "<giggle>": "lighthearted giggly delivery",
+    "<sigh>": "weary breathy sighing cadence",
+}
+
+
+def sanitize_dialogue_for_model(text: str, model_id: str) -> Tuple[str, List[str]]:
+    """
+    Formats dialogue text "for the ear, not the eye" based on model family:
+      - Normalizes markdown asterisks (`*laughs*` -> `<laugh>` for Maya-1, or removes `*emphasis*` asterisks)
+      - For `maya1`: normalizes `<laughs>` / `[laugh]` / `*sighs*` into official `<laugh>` / `<sigh>` SNAC tags
+      - For `qwen3_voicedesign` / `qwen3_clone`: extracts any `<tag>` cues so they can enrich `instruct`,
+        replaces breath tags (`<sigh>`, `<gasp>`, `<exhale>`) with natural punctuation (`... `),
+        and strips all `<...>` brackets so Qwen3 NEVER reads XML tag names out loud!
+    Returns `(cleaned_text, extracted_tags)`.
+    """
+    s = text.strip()
+    if not s:
+        return "", []
+
+    extracted_tags: List[str] = []
+
+    # Convert *laughs*, *sighs*, etc. into canonical <tag>
+    def _replace_asterisk_action(match: re.Match) -> str:
+        word = match.group(1).strip().lower()
+        if word in MAYA1_TAG_ALIASES:
+            return f" {MAYA1_TAG_ALIASES[word]} "
+        if f"<{word}>" in VALID_MAYA1_TAG_SET:
+            return f" <{word}> "
+        # Regular *emphasized* word -> keep word without asterisks
+        return match.group(1)
+
+    s = re.sub(r"\*+([^*]+)\*+", _replace_asterisk_action, s)
+
+    # Normalize <laughs>, <sighs>, etc. into canonical Maya-1 tags
+    def _normalize_angle_tag(match: re.Match) -> str:
+        raw_inner = match.group(1).strip().lower()
+        canonical = MAYA1_TAG_ALIASES.get(raw_inner, f"<{raw_inner}>")
+        if canonical in VALID_MAYA1_TAG_SET:
+            extracted_tags.append(canonical)
+            return canonical
+        return ""
+
+    s = re.sub(r"<([a-zA-Z_]+)>", _normalize_angle_tag, s)
+
+    if model_id != "maya1":
+        # Qwen3-TTS does NOT use inline <tags>; strip them cleanly so it never speaks them aloud!
+        for breath_tag in ("<sigh>", "<exhale>", "<gasp>", "<gulp>"):
+            s = s.replace(breath_tag, "... ")
+        for tag in VALID_MAYA1_TAG_SET:
+            s = s.replace(tag, " ")
+
+    # Clean up extra whitespace and awkward punctuation spacing
+    s = re.sub(r"\s+", " ", s).strip()
+    s = re.sub(r"\s+([,.!?])", r"\1", s)
+    return s, extracted_tags
+
+
+def compile_voice_instruct(
+    raw_instruct: str,
+    model_id: str = "qwen3_voicedesign",
+    extracted_tags: Optional[List[str]] = None,
+) -> str:
+    """
+    Model-Specific Prompt Compiler based on Qwen3-TTS & Maya-1 research:
+      - Qwen3-TTS VoiceDesign performs best with the 7-Dimension Formula:
+        [Identity: Gender/Age/Archetype] + [Pitch & Register] + [Texture & Timbre] + [Pace & Rhythm] + [Emotion & Tone] + [Studio Context]
+      - Maya-1 3.3B performs best with its structured `<description="...">` schema:
+        "[Role/Character], [Gender] voice in their [Age]s with a [Accent] accent, [pitch] pitch, [timbre] timbre, [pacing] pacing, [emotion] tone at [intensity] intensity."
+    Preserves 100% of the user's description while automatically appending any missing acoustic anchors.
+    """
+    base = (raw_instruct or "").strip().rstrip(".")
+    lower = base.lower()
+    tags = extracted_tags or []
+
+    # Inject any extracted inline tag emotions when targeting Qwen3
+    tag_cues = []
+    if model_id != "maya1" and tags:
+        for t in tags:
+            cue = TAG_TO_QWEN_INSTRUCT.get(t)
+            if cue and cue not in tag_cues and cue not in lower:
+                tag_cues.append(cue)
+
+    if not base:
+        if model_id == "maya1":
+            return "Expressive game character, voice in their 30s with a clear accent, medium pitch, warm resonant timbre, brisk conversational pacing, engaging tone at medium intensity."
+        return "A clear, expressive game character voice in their 30s, medium resonant pitch, warm articulate vocal texture, natural brisk conversational pacing, engaging studio dialogue delivery."
+
+    has_pitch = any(w in lower for w in ("pitch", "baritone", "bass", "tenor", "alto", "soprano", "deep", "high", "low", "mid-range"))
+    has_texture = any(w in lower for w in ("timbre", "texture", "raspy", "gravelly", "smooth", "warm", "crisp", "husky", "breathy", "resonant", "silky", "hoarse", "clear", "smoky"))
+    has_pace = any(w in lower for w in ("pace", "pacing", "cadence", "rhythm", "fast", "brisk", "snappy", "steady", "measured", "deliberate", "slow", "rapid", "conversational"))
+    has_intensity = "intensity" in lower
+
+    additions: List[str] = []
+    if tag_cues:
+        additions.extend(tag_cues)
+
+    if model_id == "maya1":
+        if not has_pitch:
+            additions.append("natural well-defined pitch")
+        if not has_texture:
+            additions.append("expressive studio vocal timbre")
+        if not has_pace:
+            additions.append("brisk conversational pacing")
+        if not has_intensity:
+            additions.append("expressive tone at medium-high intensity")
+    else:
+        # Qwen3-TTS 7-Dimension completion
+        if not has_pitch:
+            additions.append("well-anchored natural pitch")
+        if not has_texture:
+            additions.append("articulate studio vocal timbre")
+        if not has_pace:
+            additions.append("natural conversational pacing")
+        if "studio" not in lower and "dialogue" not in lower and "mic" not in lower:
+            additions.append("close-mic studio game dialogue presence")
+
+    if additions:
+        return f"{base}, {', '.join(additions)}."
+    return f"{base}."
+
+
+def optimize_character_prompts(
+    concept: str,
+    name: str = "Character",
+    gender_age_hint: str = "",
+) -> Dict[str, str]:
+    """
+    Takes a short or rough character concept (e.g. 'grumpy dwarven blacksmith' or 'sarcastic cyberpunk hacker')
+    and returns ready-to-use, research-optimized prompts for both Qwen3-TTS VoiceDesign and Maya-1,
+    plus a phonetically balanced 10-second Golden Reference Sample for zero-drift Qwen3 Base Voice Cloning.
+    """
+    c = concept.strip().rstrip(".")
+    low = c.lower()
+
+    # Infer helpful defaults if user gave only a 2-3 word concept
+    gender = "female" if any(w in low for w in ("female", "woman", "girl", "queen", "witch", "sorceress", "sister", "lady", "mother", "priestess", "heroine")) else (
+        "male" if any(w in low for w in ("male", "man", "boy", "king", "wizard", "dwarf", "blacksmith", "knight", "father", "lord", "brother")) else "distinctive"
+    )
+    age = "in their 50s" if any(w in low for w in ("old", "elder", "ancient", "veteran", "weathered", "grumpy", "blacksmith", "mentor")) else (
+        "in their 20s" if any(w in low for w in ("young", "teen", "bubbly", "rookie", "apprentice", "energetic", "rogue")) else "in their 30s"
+    )
+    accent = "Scottish accent" if "dwarf" in low or "scottish" in low else (
+        "British accent" if any(w in low for w in ("british", "villain", "noble", "aristocrat", "wizard", "rogue", "knight")) else "neutral American accent"
+    )
+    pitch = "deep resonant low pitch" if any(w in low for w in ("dwarf", "villain", "warrior", "giant", "commander", "noir", "baritone", "deep")) else (
+        "bright mid-high pitch" if any(w in low for w in ("bubbly", "energetic", "alchemist", "companion", "young")) else "confident mid-range pitch"
+    )
+    texture = "gravelly raspy weathered vocal texture" if any(w in low for w in ("dwarf", "grumpy", "rough", "veteran", "blacksmith", "warrior", "pirate")) else (
+        "smooth, sultry, slightly husky studio timbre" if any(w in low for w in ("sexy", "sultry", "alluring", "smooth", "charismatic", "flirty")) else "crisp, expressive, articulate vocal texture"
+    )
+
+    qwen_prompt = compile_voice_instruct(
+        f"{c}. A {gender} voice {age} with a {accent}, {pitch}, {texture}, brisk natural conversational pacing, expressive character acting for studio game dialogue",
+        model_id="qwen3_voicedesign",
+    )
+    maya_prompt = compile_voice_instruct(
+        f"{c}, {gender.capitalize()} voice {age} with a {accent}, {pitch}, {texture}, brisk conversational pacing, expressive character tone at medium-high intensity",
+        model_id="maya1",
+    )
+
+    # 10-second phonetically rich Golden Reference sentence (ideal for Qwen3-TTS Base ICL Voice Cloning)
+    golden_sample_qwen = (
+        f"Listen closely, friend. Everyone in this place has a secret they are trying to hide, "
+        f"and if we want to make it out before sunrise, you had better stick right beside me."
+    )
+    golden_sample_maya = (
+        f"Listen closely, friend. <sigh> Everyone in this place has a secret they are trying to hide, "
+        f"<chuckle> and if we want to make it out before sunrise, you had better stick right beside me."
+    )
+
+    return {
+        "name": name,
+        "raw_concept": concept,
+        "instruct_qwen": qwen_prompt,
+        "instruct_maya": maya_prompt,
+        "golden_sample_qwen": golden_sample_qwen,
+        "golden_sample_maya": golden_sample_maya,
+    }
+
 
 
 class Maya1MLXRunner:
@@ -443,13 +665,17 @@ class VoiceForgeEngine:
             info = MODEL_REGISTRY[model_id]
             t0 = time.perf_counter()
 
+            # Clean spoken text ("for the ear, not the eye") and compile model-specific instruct prompt
+            clean_text, extracted_tags = sanitize_dialogue_for_model(text, model_id=model_id)
+            compiled_instruct = compile_voice_instruct(instruct, model_id=model_id, extracted_tags=extracted_tags)
+
             if info["family"] == "maya1":
                 temp = temperature if temperature is not None else 0.45
                 tp = top_p if top_p is not None else 0.90
                 rp = repetition_penalty if repetition_penalty is not None else 1.15
                 audio_np, metrics = self.active_model.generate(
-                    text=text,
-                    instruct=instruct or "Realistic voice in their 30s, clear diction, natural conversational pacing.",
+                    text=clean_text,
+                    instruct=compiled_instruct,
                     temperature=temp,
                     top_p=tp,
                     repetition_penalty=rp,
@@ -457,6 +683,7 @@ class VoiceForgeEngine:
                 audio_np = apply_studio_pacing(audio_np, 24000, speed=speed, trim_silence=trim_silence)
                 metrics["duration_sec"] = round(audio_np.shape[0] / 24000, 2)
                 metrics["speed"] = round(speed, 2)
+                metrics["compiled_instruct"] = compiled_instruct
                 return audio_np, 24000, metrics
 
             # Qwen3-TTS family
@@ -469,8 +696,8 @@ class VoiceForgeEngine:
                     raise ValueError("Please provide a character/voice description for Qwen3 VoiceDesign.")
                 results = list(
                     self.active_model.generate_voice_design(
-                        text=text,
-                        instruct=instruct,
+                        text=clean_text,
+                        instruct=compiled_instruct,
                         language=language,
                         temperature=temp,
                         top_p=tp,
@@ -480,11 +707,12 @@ class VoiceForgeEngine:
             elif info["mode"] == "voice_clone":
                 if not ref_audio_path or not ref_text:
                     raise ValueError("Voice Lock / Clone mode requires selecting a saved character voice (reference audio + transcript).")
+                clean_ref_text, _ = sanitize_dialogue_for_model(ref_text, model_id="qwen3_clone")
                 results = list(
                     self.active_model.generate(
-                        text=text,
+                        text=clean_text,
                         ref_audio=ref_audio_path,
-                        ref_text=ref_text,
+                        ref_text=clean_ref_text,
                         lang_code=language,
                         temperature=temp,
                         top_p=tp,
@@ -511,5 +739,6 @@ class VoiceForgeEngine:
                 "rtf": round(duration / elapsed, 2) if elapsed > 0 else 0,
                 "tokens": total_tokens,
                 "speed": round(speed, 2),
+                "compiled_instruct": compiled_instruct,
                 "peak_memory_gb": round(mx.get_peak_memory() / 1e9, 2),
             }
