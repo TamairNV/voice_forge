@@ -2081,6 +2081,7 @@ EXTRACT_SCHEMA = {
                     "speaker": {"type": "string"},
                     "text": {"type": "string"},
                     "direction": {"type": "string"},
+                    "variant_voice_id": {"type": "string"},
                 },
                 "required": ["speaker", "text"],
             },
@@ -2097,6 +2098,9 @@ EXTRACT_SYSTEM = (
     "If an existing studio voice clearly fits (same name, or an obvious match), put its id in suggested_voice_id, else leave it empty. "
     "Then list the spoken lines in order. Keep the dialogue words exactly; drop stage directions from `text` and put any acting "
     "direction for that line (e.g. 'panicked', 'whispering') in `direction`. "
+    "The roster often holds emotion variants of one person (e.g. 'Phoebe', 'Phoebe Panicked', 'Phoebe Pleading'). When a line's mood "
+    "clearly matches a variant of the voice you suggested for that speaker, put the variant's id in that line's variant_voice_id; "
+    "otherwise leave it empty. Never pick a variant of a different person. "
     "If the input is only prose with no dialogue yet, write plausible lines that tell the same beats. "
     "Also suggest a short title."
 )
@@ -2237,7 +2241,13 @@ def api_cast_extract(req: CastExtractRequest):
             match = _resolve_character(spk)
             chars.append({"name": spk, "description": "", "suggested_voice_id": match["id"] if match else ""})
             known.add(spk.lower())
-        lines.append({"speaker": spk, "text": txt, "direction": str(l.get("direction") or "").strip()})
+        variant = str(l.get("variant_voice_id") or "").strip()
+        lines.append({
+            "speaker": spk,
+            "text": txt,
+            "direction": str(l.get("direction") or "").strip(),
+            "variant_voice_id": variant if variant in roster_ids else "",
+        })
 
     if not chars:
         raise HTTPException(status_code=422, detail=warning or "No speaking characters found in that script.")

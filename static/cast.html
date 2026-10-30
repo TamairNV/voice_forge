@@ -124,6 +124,9 @@
     .newvoice { border-top: 1px dashed var(--border-light); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
     .newvoice textarea { min-height: 84px; font-size: 12px; }
     .improve-note { font-size: 11px; color: #c4b5fd; }
+    .auditions { display: flex; flex-direction: column; gap: 4px; padding: 6px; border-radius: 8px; background: var(--bg-input); }
+    .seg-text { background: transparent; border-color: transparent; padding: 4px 6px; color: var(--text-muted); }
+    .seg-text:hover, .seg-text:focus { border-color: var(--border); color: var(--text-main); }
 
     .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px 18px; align-items: end; }
     input[type=range] { width: 100%; accent-color: var(--accent-indigo); }
@@ -182,7 +185,7 @@
           <button class="btn primary grow" id="extractBtn" onclick="extractCast(true)">✨ Extract cast with Claude</button>
           <button class="btn" onclick="extractCast(false)" title="Offline: only understands `Name: line` scripts">Parse only</button>
         </div>
-        <div class="dim" style="margin-top: 6px;">Extraction uses a fast model (<span id="extractModel">haiku</span>). It also splits out stage directions and suggests voices from your roster.</div>
+        <div class="dim" style="margin-top: 6px;">Extraction uses a fast model (<span id="extractModel">haiku</span>). It also splits out stage directions and suggests voices, including emotion variants, from your roster. ⌘↵ also extracts.</div>
         <div id="extractWarn" class="warn-box" style="display:none; margin-top: 8px;"></div>
 
         <label class="field">Scene title</label>
@@ -195,6 +198,9 @@
           <button class="btn-sm rose" onclick="deleteSavedCast()">Delete</button>
         </div>
         <button class="btn" style="margin-top: 8px; width: 100%;" onclick="saveCast()">💾 Save this cast</button>
+
+        <div class="panel-title" style="margin-top: 16px;"><span>Recent scenes</span></div>
+        <select id="recentSelect" onchange="openRecentScene(this.value)"><option value="">— open a recent scene —</option></select>
       </div>
     </div>
 
@@ -203,7 +209,7 @@
       <div class="panel">
         <div class="panel-title">
           <span>2 · Cast the voices <span id="castCount" class="badge" style="margin-left: 6px;">0</span></span>
-          <span class="dim" style="text-transform: none; letter-spacing: 0;">Pick an existing voice, or make a new one</span>
+          <button class="btn-sm emerald" id="createAllBtn" onclick="createAllMissing()" title="Design and lock a voice for every uncast character that has a description">🎙 Create all missing</button>
         </div>
         <div id="castGrid" class="cast-grid"><div class="empty">Extract a script to see its characters here.</div></div>
       </div>
@@ -268,6 +274,9 @@
     let claudeOk = false;
 
     function $(id) { return document.getElementById(id); }
+    function newVoiceState(open, description) {
+      return { open, description: description || '', sample: '', notes: '', busy: false, prev: null, auditions: [] };
+    }
     function escapeHtml(str) {
       return String(str ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
     }
@@ -362,15 +371,19 @@
           const voiceId = rememberedVoice(c.name) && voiceById(rememberedVoice(c.name)) ? rememberedVoice(c.name) : (c.suggested_voice_id || '');
           return {
             key: c.name, scriptName: c.name, name: c.name, description: c.description || '', voiceId,
-            newVoice: { open: !voiceId, description: c.description || '', sample: '', notes: '', busy: false },
+            newVoice: newVoiceState(!voiceId, c.description),
           };
         });
-        state.lines = d.lines.map(l => ({ speaker: l.speaker, text: l.text, direction: l.direction || '', variantId: '' }));
-        // Map speakers to cast keys case-insensitively
+        state.lines = d.lines.map(l => ({ speaker: l.speaker, text: l.text, direction: l.direction || '', variantId: l.variant_voice_id || '' }));
+        // Map speakers to cast keys case-insensitively; drop variants that just repeat the cast voice
+        let variants = 0;
         state.lines.forEach(l => {
           const c = state.cast.find(x => x.key.toLowerCase() === l.speaker.toLowerCase());
           if (c) l.speaker = c.key;
+          if (l.variantId && (!voiceById(l.variantId) || (c && l.variantId === c.voiceId))) l.variantId = '';
+          if (l.variantId) variants++;
         });
+        if (variants) setTimeout(() => toast(`Matched ${variants} line${variants === 1 ? '' : 's'} to emotion variants. Check the Lines list.`, 4500), 3300);
         renderAll();
         toast(`Found ${state.cast.length} characters and ${state.lines.length} lines` + (d.via === 'parser' ? ' (built-in parser)' : ''));
       } catch (e) {
@@ -422,10 +435,17 @@
             <textarea oninput="state.cast[${i}].newVoice.description = this.value" placeholder="e.g. 30s woman, Glaswegian, sharp and sarcastic, talks fast">${escapeHtml(nv.description)}</textarea>
             <label class="field" style="margin: 0;">Reference line it speaks (optional)</label>
             <input type="text" oninput="state.cast[${i}].newVoice.sample = this.value" value="${escapeHtml(nv.sample)}" placeholder="${escapeHtml(DEFAULT_SAMPLE)}" />
-            ${nv.notes ? `<div class="improve-note">✨ ${escapeHtml(nv.notes)}</div>` : ''}
+            ${nv.notes ? `<div class="improve-note">✨ ${escapeHtml(nv.notes)} ${nv.prev ? `<a href="#" onclick="undoImprove(${i}); return false;" style="color: #a5b4fc;">↩ Undo</a>` : ''}</div>` : ''}
+            ${nv.auditions.length ? `<div class="auditions">${nv.auditions.map((t, k) => `
+              <div class="row tight audition">
+                <span class="dim grow">Take ${k + 1} · ${t.metrics ? t.metrics.duration_sec + 's' : ''}</span>
+                <button class="btn-sm" onclick="play('${t.url}')">▶ Play</button>
+                <button class="btn-sm emerald" onclick="lockAudition(${i}, ${k}, this)" ${nv.busy ? 'disabled' : ''}>🔒 Use this one</button>
+              </div>`).join('')}</div>` : ''}
             <div class="row tight">
               <button class="btn-sm violet" onclick="improveVoice(${i}, this)" ${nv.busy ? 'disabled' : ''} title="Optional: a strong Claude model rewrites the description for more emotion and writes a lively reference line">✨ Improve for emotion</button>
-              <button class="btn-sm emerald" onclick="createVoice(${i}, this)" ${nv.busy ? 'disabled' : ''}>🎙 Create voice</button>
+              <button class="btn-sm emerald" onclick="createVoice(${i}, this)" ${nv.busy ? 'disabled' : ''} title="Design one take and lock it straight away">🎙 Create voice</button>
+              <button class="btn-sm" onclick="auditionVoice(${i}, this)" ${nv.busy ? 'disabled' : ''} title="Design 3 different takes from this description, then keep the one you like">🎧 Audition 3</button>
               ${v ? `<button class="btn-sm" onclick="state.cast[${i}].newVoice.open = false; renderCast()">Cancel</button>` : ''}
             </div>
           </div>` : `<div><button class="btn-sm" onclick="state.cast[${i}].newVoice.open = true; renderCast()">➕ Make a new voice instead</button></div>`}
@@ -473,17 +493,19 @@
           method: 'POST',
           body: JSON.stringify({ name: c.name, description: nv.description || c.description, lines: linesFor(c.key).map(l => l.text) }),
         });
+        nv.prev = { description: nv.description, sample: nv.sample };
         nv.description = d.description; nv.sample = d.sample_text; nv.notes = d.notes || 'Description improved.';
         toast('Description improved. Review it, then create the voice.');
       } catch (e) { toast('Improve failed: ' + e.message, 6000); }
       nv.busy = false; renderCast();
     }
-    async function createVoice(i, btn) {
+    async function createVoice(i, btn, quiet = false) {
       const c = state.cast[i];
       const nv = c.newVoice;
       const instruct = (nv.description || '').trim();
       if (!instruct) { toast('Write a description for the new voice first.'); return; }
-      nv.busy = true; btn.innerHTML = '<span class="spinner"></span> Designing voice…'; btn.disabled = true;
+      nv.busy = true;
+      if (btn) { btn.innerHTML = '<span class="spinner"></span> Designing voice…'; btn.disabled = true; }
       setTts(true, 'Designing ' + c.name);
       try {
         const d = await api('/api/characters/design-and-lock', {
@@ -492,12 +514,70 @@
         });
         state.roster = d.characters;
         c.voiceId = d.character.id;
-        nv.open = false; nv.notes = '';
+        nv.open = false; nv.notes = ''; nv.prev = null; nv.auditions = [];
         rememberVoice(c.scriptName, c.voiceId);
-        play(d.character.url);
+        if (!quiet) play(d.character.url);
         toast(`Created and locked "${d.character.name}". Playing it now.`);
       } catch (e) { toast('Create failed: ' + e.message, 6000); }
       nv.busy = false; setTts(false); renderAll();
+    }
+    async function createAllMissing() {
+      const todo = state.cast.filter(c => !voiceById(c.voiceId) && (c.newVoice.description || '').trim());
+      const skipped = state.cast.filter(c => !voiceById(c.voiceId) && !(c.newVoice.description || '').trim());
+      if (!todo.length) { toast(skipped.length ? 'Write a description for the uncast characters first.' : 'Everyone already has a voice.'); return; }
+      for (const c of todo) {
+        toast(`Designing ${c.name} (${todo.indexOf(c) + 1}/${todo.length})…`, 60000);
+        await createVoice(state.cast.indexOf(c), null, true);
+      }
+      toast(`Created ${todo.length} voice${todo.length === 1 ? '' : 's'}.` + (skipped.length ? ` Still need a description: ${skipped.map(c => c.name).join(', ')}.` : ''));
+    }
+    function undoImprove(i) {
+      const nv = state.cast[i].newVoice;
+      if (!nv.prev) return;
+      nv.description = nv.prev.description; nv.sample = nv.prev.sample; nv.prev = null; nv.notes = '';
+      renderCast();
+    }
+    async function auditionVoice(i, btn) {
+      const c = state.cast[i];
+      const nv = c.newVoice;
+      const instruct = (nv.description || '').trim();
+      if (!instruct) { toast('Write a description for the new voice first.'); return; }
+      nv.busy = true; nv.auditions = [];
+      btn.innerHTML = '<span class="spinner"></span> Take 1/3…'; btn.disabled = true;
+      try {
+        for (let k = 0; k < 3; k++) {
+          btn.innerHTML = `<span class="spinner"></span> Take ${k + 1}/3…`;
+          setTts(true, `Auditioning ${c.name} ${k + 1}/3`);
+          const d = await api('/api/synthesize', {
+            method: 'POST',
+            body: JSON.stringify({
+              model_id: 'qwen3_voicedesign', text: (nv.sample || '').trim() || DEFAULT_SAMPLE, instruct,
+              temperature: tempValue(), seed: Math.floor(Math.random() * 1e9),
+            }),
+          });
+          nv.auditions.push(d.take);
+        }
+        toast('3 takes ready. Play them and keep your favourite.');
+      } catch (e) { toast('Audition failed: ' + e.message, 6000); }
+      nv.busy = false; setTts(false); renderCast();
+    }
+    async function lockAudition(i, k, btn) {
+      const c = state.cast[i];
+      const nv = c.newVoice;
+      const take = nv.auditions[k];
+      btn.innerHTML = '<span class="spinner"></span>'; btn.disabled = true;
+      try {
+        const d = await api('/api/characters/from-take', {
+          method: 'POST',
+          body: JSON.stringify({ take_id: take.id, name: c.name, description: nv.description.trim() }),
+        });
+        state.roster = d.characters;
+        c.voiceId = d.character.id;
+        nv.open = false; nv.notes = ''; nv.prev = null; nv.auditions = [];
+        rememberVoice(c.scriptName, c.voiceId);
+        toast(`Locked take ${k + 1} as "${d.character.name}".`);
+      } catch (e) { toast('Lock failed: ' + e.message, 6000); }
+      renderAll();
     }
     async function tryLine(i, btn) {
       const c = state.cast[i];
@@ -549,7 +629,7 @@
     }
     function addLine() {
       if (!state.cast.length) {
-        state.cast.push({ key: 'Narrator', scriptName: 'Narrator', name: 'Narrator', description: '', voiceId: '', newVoice: { open: true, description: '', sample: '', notes: '', busy: false } });
+        state.cast.push({ key: 'Narrator', scriptName: 'Narrator', name: 'Narrator', description: '', voiceId: '', newVoice: newVoiceState(true, '') });
       }
       state.lines.push({ speaker: state.cast[0].key, text: '', direction: '', variantId: '' });
       renderAll();
@@ -609,6 +689,7 @@
         state.roster = d.characters || state.roster;
         state.scene = d.scene;
         showResult(true);
+        loadRecentScenes();
         toast(`Scene ready: ${d.scene.duration_sec}s, rendered in ${d.scene.elapsed_sec}s.`);
       } catch (e) {
         toast('Render failed: ' + e.message, 7000);
@@ -634,7 +715,7 @@
           <div class="seg">
             <span class="line-idx">${seg.index}</span>
             <span class="spk" title="${escapeHtml(seg.speaker)}">${escapeHtml(seg.speaker)}</span>
-            <span class="txt">${escapeHtml(seg.text)}</span>
+            <input type="text" class="txt seg-text" id="segText${seg.index}" value="${escapeHtml(seg.text)}" title="Edit, then Re-roll to regenerate with the new words" />
             <span class="row tight">
               <button class="btn-sm" onclick="play('${seg.take_url}')" title="Play just this line">▶</button>
               <button class="btn-sm violet" onclick="rerollLine(${seg.index}, this)" title="Re-generate this line with a fresh take and re-stitch the scene">🎲 Re-roll</button>
@@ -649,6 +730,9 @@
       setTts(true, 'Re-rolling line ' + index);
       try {
         const body = { line_index: index, seed: Math.floor(Math.random() * 1e9) };
+        const edited = $('segText' + index);
+        const original = s.segments.find(x => x.index === index);
+        if (edited && original && edited.value.trim() && edited.value.trim() !== original.text) body.text = edited.value.trim();
         const t = tempValue(); if (t !== null) body.temperature = t;
         const d = await api(`/api/scenes/${s.id}/reroll-line`, { method: 'POST', body: JSON.stringify(body) });
         state.scene = d.scene || s;
@@ -692,7 +776,7 @@
       state.cast = (c.mapping || []).map(m => ({
         key: m.key || m.name, scriptName: m.script_name || m.name, name: m.name, description: m.description || '',
         voiceId: voiceById(m.voice_id) ? m.voice_id : '',
-        newVoice: { open: !voiceById(m.voice_id), description: m.description || '', sample: '', notes: '', busy: false },
+        newVoice: newVoiceState(!voiceById(m.voice_id), m.description),
       }));
       state.lines = (c.lines || []).map(l => ({ speaker: l.speaker, text: l.text, direction: l.direction || '', variantId: l.variantId || '' }));
       if (c.temperature !== null && c.temperature !== undefined) { $('tempAuto').checked = false; $('tempSlider').value = c.temperature; }
@@ -724,9 +808,26 @@ MARK: ...Dav from upstairs?`;
     }
 
     $('sceneTitle').addEventListener('input', () => { $('sceneTitle').dataset.auto = '0'; });
+    $('scriptInput').addEventListener('keydown', e => {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); extractCast(true); }
+    });
+    async function loadRecentScenes() {
+      try {
+        const d = await api('/api/scenes');
+        state.recentScenes = (d.scenes || []).slice(0, 25);
+        $('recentSelect').innerHTML = '<option value="">— open a recent scene —</option>' + state.recentScenes
+          .map(s => `<option value="${s.id}">${escapeHtml(s.title)} · ${s.duration_sec}s · ${escapeHtml(s.created_at || '')}</option>`).join('');
+      } catch (e) { /* scenes list is optional */ }
+    }
+    function openRecentScene(id) {
+      const s = (state.recentScenes || []).find(x => x.id === id);
+      if (!s) return;
+      state.scene = s;
+      showResult(false);
+    }
     syncTemp();
     renderAll();
-    Promise.all([loadStatus(), loadRoster(), loadSaved()]).catch(e => toast('Could not reach the server: ' + e.message));
+    Promise.all([loadStatus(), loadRoster(), loadSaved(), loadRecentScenes()]).catch(e => toast('Could not reach the server: ' + e.message));
   </script>
 </body>
 </html>
