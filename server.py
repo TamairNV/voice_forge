@@ -13,6 +13,7 @@ and external LLMs / AI agents / game engines can control every feature programma
 
 import io
 import json
+import os
 import random
 import re
 import shutil
@@ -347,7 +348,7 @@ class SceneRenderRequest(BaseModel):
     title: str = Field("Game Cutscene", description="Title of the scene.")
     cast: Dict[str, Any] = Field(
         default_factory=dict,
-        description="Optional dictionary mapping Character Name -> Voice Description string OR Audio Recording Path string OR Dict `{'audio': '/path/to/clip.wav', 'ref_text': '...'}`.",
+        description="Optional dictionary mapping Character Name -> Voice Description string OR Audio Recording Path string OR Dict `{'audio': '/path/to/clip.wav', 'ref_text': '...'}` OR Dict `{'character_id': 'char_...'}` to cast an existing locked voice under this name.",
     )
     lines: List[SceneLineItem] = Field(
         default_factory=list,
@@ -1359,7 +1360,12 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
     # -------------------------------------------------------------------------
     for raw_speaker, cast_val in (req.cast or {}).items():
         s_key = raw_speaker.strip().lower()
-        if isinstance(cast_val, dict) and any(k in cast_val for k in ("audio", "ref_audio", "file", "audio_path")):
+        if isinstance(cast_val, dict) and cast_val.get("character_id"):
+            char = _resolve_character(str(cast_val["character_id"]))
+            if not char:
+                raise HTTPException(status_code=404, detail=f"Voice '{cast_val['character_id']}' for {raw_speaker} not found in Character Locker.")
+            resolved_cast_map[s_key] = char
+        elif isinstance(cast_val, dict) and any(k in cast_val for k in ("audio", "ref_audio", "file", "audio_path")):
             audio_src = cast_val.get("audio") or cast_val.get("ref_audio") or cast_val.get("file") or cast_val.get("audio_path")
             ref_txt = cast_val.get("ref_text") or cast_val.get("text")
             desc = cast_val.get("description") or f"Cloned voice from audio recording for {raw_speaker}"
@@ -1954,6 +1960,374 @@ def api_delete_scene(scene_id: str):
     scenes = [s for s in scenes if s["id"] != scene_id]
     _write_json(SCENES_JSON, scenes)
     return {"scenes": scenes}
+
+
+# ============================================================================
+# Casting Desk: Claude-assisted script breakdown, voice casting & saved casts
+# ============================================================================
+
+CASTS_JSON = DATA_DIR / "casts.json"
+
+# Cheap model pulls names out of a script; the strong model writes voice descriptions.
+CLAUDE_EXTRACT_MODEL = os.environ.get("VOICEFORGE_EXTRACT_MODEL", "haiku")
+CLAUDE_IMPROVE_MODEL = os.environ.get("VOICEFORGE_IMPROVE_MODEL", "opus")
+CLAUDE_API_MODEL_IDS = {"haiku": "claude-haiku-5-5", "sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5"}
+
+
+def _find_claude_cli() -> Optional[str]:
+    found = shutil.which("claude")
+    if found:
+        return found
+    for cand in (Path.home() / ".local/bin/claude", Path("/opt/homebrew/bin/claude"), Path("/usr/local/bin/claude")):
+        if cand.exists():
+            return str(cand)
+    return None
+
+
+def _extract_json_blob(text: str) -> Any:
+    """Pull the first JSON object out of a model reply (tolerates ```json fences and chatter)."""
+    t = text.strip()
+    fence = re.search(r"```(?:json)?\s*(.+?)```", t, re.DOTALL)
+    if fence:
+        t = fence.group(1).strip()
+    try:
+        return json.loads(t)
+    except Exception:
+        pass
+    start, end = t.find("{"), t.rfind("}")
+    if start != -1 and end > start:
+        return json.loads(t[start:end + 1])
+    raise ValueError("Claude did not return JSON.")
+
+
+def _ask_claude(system: str, prompt: str, schema: dict, model: str, timeout: int = 180, effort: Optional[str] = None) -> dict:
+    """
+    Ask Claude for a JSON object. Uses the Anthropic API when ANTHROPIC_API_KEY is set,
+    otherwise the local `claude` CLI in headless mode (uses Tamair's Claude login, no tools).
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if api_key:
+        import urllib.request
+        body = {
+            "model": CLAUDE_API_MODEL_IDS.get(model, model),
+            "max_tokens": 4096,
+            "system": system + "\n\nReply with a single JSON object matching this schema and nothing else:\n" + json.dumps(schema),
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=json.dumps(body).encode(),
+            headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read())
+        text = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
+        return _extract_json_blob(text)
+
+    cli = _find_claude_cli()
+    if not cli:
+        raise RuntimeError("Claude is not available: install the `claude` CLI and sign in, or set ANTHROPIC_API_KEY.")
+
+    # Don't let a parent Claude Code session's env leak into the child CLI
+    env = {k: v for k, v in os.environ.items() if not (k.startswith("CLAUDE_CODE") or k in ("CLAUDECODE", "ANTHROPIC_BASE_URL"))}
+    cmd = [
+        cli, "-p", prompt,
+        "--model", model,
+        "--output-format", "json",
+        "--system-prompt", system,
+        "--json-schema", json.dumps(schema),
+        "--tools", "",
+        "--strict-mcp-config",
+        "--no-session-persistence",
+    ]
+    if effort:
+        cmd += ["--effort", effort]
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=str(DATA_DIR), env=env)
+    try:
+        out = json.loads(proc.stdout)
+    except Exception:
+        raise RuntimeError(f"Claude CLI failed: {(proc.stderr or proc.stdout).strip()[:400]}")
+    if out.get("is_error"):
+        msg = str(out.get("result", "unknown error"))
+        if "authenticate" in msg.lower() or "login" in msg.lower():
+            msg += " (run `claude auth login` in a terminal on this Mac)"
+        raise RuntimeError(f"Claude CLI error: {msg}")
+    if isinstance(out.get("structured_output"), dict):
+        return out["structured_output"]
+    return _extract_json_blob(str(out.get("result", "")))
+
+
+EXTRACT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "characters": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "description": {"type": "string"},
+                    "suggested_voice_id": {"type": "string"},
+                },
+                "required": ["name", "description"],
+            },
+        },
+        "lines": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "speaker": {"type": "string"},
+                    "text": {"type": "string"},
+                    "direction": {"type": "string"},
+                },
+                "required": ["speaker", "text"],
+            },
+        },
+    },
+    "required": ["characters", "lines"],
+}
+
+EXTRACT_SYSTEM = (
+    "You break comedy sketches, scripts and loose story notes into spoken dialogue for a text-to-speech studio. "
+    "List every character who speaks (merge spelling variants and stage-name casing; keep the most natural form, e.g. 'Dave' not 'DAVE'). "
+    "For each one give a short voice description inferred from the script (gender, rough age, accent, personality, how they talk); "
+    "say 'unknown' for anything the script doesn't hint at. "
+    "If an existing studio voice clearly fits (same name, or an obvious match), put its id in suggested_voice_id, else leave it empty. "
+    "Then list the spoken lines in order. Keep the dialogue words exactly; drop stage directions from `text` and put any acting "
+    "direction for that line (e.g. 'panicked', 'whispering') in `direction`. "
+    "If the input is only prose with no dialogue yet, write plausible lines that tell the same beats. "
+    "Also suggest a short title."
+)
+
+
+def _roster_brief() -> List[dict]:
+    return [
+        {"id": c["id"], "name": c["name"], "description": (c.get("description") or "")[:140]}
+        for c in _read_json(CHARACTERS_JSON, [])
+    ]
+
+
+def _heuristic_extract(script: str) -> dict:
+    """Offline fallback when Claude is unavailable: parse `Name: line` scripts."""
+    lines = _parse_script_text_to_lines(script)
+    seen: Dict[str, dict] = {}
+    for l in lines:
+        if l.speaker.isupper():
+            l.speaker = l.speaker.title()  # screenplay-style DAVE -> Dave
+        key = l.speaker.strip().lower()
+        if key not in seen:
+            match = _resolve_character(l.speaker)
+            seen[key] = {
+                "name": l.speaker.strip(),
+                "description": l.instruct or "",
+                "suggested_voice_id": match["id"] if match else "",
+            }
+    return {
+        "title": "Untitled Scene",
+        "characters": list(seen.values()),
+        "lines": [{"speaker": l.speaker.strip(), "text": l.text, "direction": ""} for l in lines],
+    }
+
+
+class CastExtractRequest(BaseModel):
+    script: str = Field(..., description="A sketch, script, or a few lines of dialogue / story notes.")
+    model: Optional[str] = Field(None, description="Claude model alias for extraction (defaults to a fast cheap model, 'haiku').")
+    use_claude: bool = Field(True, description="False skips Claude and uses the built-in `Name: line` parser.")
+
+
+class CastImproveRequest(BaseModel):
+    name: str = Field("Character", description="Character name.")
+    description: str = Field("", description="Rough voice description or notes from the user.")
+    lines: List[str] = Field(default_factory=list, description="Some of the character's lines from the script, for context.")
+    model: Optional[str] = Field(None, description="Claude model alias (defaults to a strong model, 'opus').")
+
+
+class SavedCastRequest(BaseModel):
+    name: str = Field(..., description="Name for this saved cast / scene setup.")
+    script: str = Field("", description="Original pasted script.")
+    title: str = Field("", description="Scene title.")
+    mapping: List[dict] = Field(default_factory=list, description="List of {name, voice_id, script_name?}.")
+    lines: List[dict] = Field(default_factory=list, description="List of {speaker, text, direction?}.")
+    temperature: Optional[float] = None
+
+
+class RenameCharacterRequest(BaseModel):
+    name: str = Field(..., description="New display name for the locked character voice.")
+
+
+@app.get("/cast", response_class=HTMLResponse, include_in_schema=False)
+def cast_page():
+    return (STATIC_DIR / "cast.html").read_text(encoding="utf-8")
+
+
+@app.get("/api/cast/claude-status", tags=["Casting Desk"])
+def api_cast_claude_status():
+    """Report whether the server can reach Claude (API key or a signed-in `claude` CLI)."""
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return {"available": True, "via": "api", "detail": "ANTHROPIC_API_KEY"}
+    cli = _find_claude_cli()
+    if not cli:
+        return {"available": False, "via": None, "detail": "claude CLI not found"}
+    env = {k: v for k, v in os.environ.items() if not (k.startswith("CLAUDE_CODE") or k in ("CLAUDECODE", "ANTHROPIC_BASE_URL"))}
+    try:
+        out = subprocess.run([cli, "auth", "status"], capture_output=True, text=True, timeout=20, env=env)
+        info = json.loads(out.stdout)
+        logged_in = bool(info.get("loggedIn"))
+    except Exception:
+        logged_in = False
+    return {
+        "available": logged_in,
+        "via": "cli",
+        "detail": "signed in" if logged_in else "claude CLI is logged out: run `claude auth login`",
+        "extract_model": CLAUDE_EXTRACT_MODEL,
+        "improve_model": CLAUDE_IMPROVE_MODEL,
+    }
+
+
+@app.post("/api/cast/extract", tags=["Casting Desk"])
+def api_cast_extract(req: CastExtractRequest):
+    """
+    Break a sketch / script into characters + ordered lines with a fast Claude model,
+    suggesting an existing locked voice for each character where one fits.
+    Falls back to the built-in `Name: line` parser if Claude is unavailable.
+    """
+    if not req.script.strip():
+        raise HTTPException(status_code=400, detail="Paste a script or some lines first.")
+    roster = _roster_brief()
+    roster_ids = {c["id"] for c in roster}
+    warning = None
+    via = "claude"
+    if req.use_claude:
+        prompt = (
+            "Existing studio voices (id, name, description):\n"
+            + json.dumps(roster, ensure_ascii=False)
+            + "\n\nScript:\n<<<\n" + req.script.strip() + "\n>>>"
+        )
+        try:
+            result = _ask_claude(EXTRACT_SYSTEM, prompt, EXTRACT_SCHEMA, req.model or CLAUDE_EXTRACT_MODEL, effort="low")
+        except Exception as e:
+            warning = f"{e} Used the built-in parser instead."
+            result = _heuristic_extract(req.script)
+            via = "parser"
+    else:
+        result = _heuristic_extract(req.script)
+        via = "parser"
+
+    chars = []
+    for c in result.get("characters", []):
+        name = str(c.get("name", "")).strip()
+        if not name:
+            continue
+        sid = str(c.get("suggested_voice_id") or "").strip()
+        if sid not in roster_ids:
+            match = _resolve_character(name)
+            sid = match["id"] if match else ""
+        chars.append({"name": name, "description": str(c.get("description", "")).strip(), "suggested_voice_id": sid})
+
+    # Make sure every speaker in `lines` has a character entry
+    known = {c["name"].lower() for c in chars}
+    lines = []
+    for l in result.get("lines", []):
+        spk, txt = str(l.get("speaker", "")).strip(), str(l.get("text", "")).strip()
+        if not spk or not txt:
+            continue
+        if spk.lower() not in known:
+            match = _resolve_character(spk)
+            chars.append({"name": spk, "description": "", "suggested_voice_id": match["id"] if match else ""})
+            known.add(spk.lower())
+        lines.append({"speaker": spk, "text": txt, "direction": str(l.get("direction") or "").strip()})
+
+    if not chars:
+        raise HTTPException(status_code=422, detail=warning or "No speaking characters found in that script.")
+    return {"title": result.get("title") or "Untitled Scene", "characters": chars, "lines": lines, "via": via, "warning": warning}
+
+
+IMPROVE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "description": {"type": "string"},
+        "sample_text": {"type": "string"},
+        "notes": {"type": "string"},
+    },
+    "required": ["description", "sample_text"],
+}
+
+IMPROVE_SYSTEM = (
+    "You are a voice director writing prompts for Qwen3-TTS VoiceDesign, which invents a voice from a plain-English description. "
+    "Rewrite the user's rough description into one rich paragraph (60-110 words) covering: persona and attitude, gender and age, accent, "
+    "pitch and register, vocal texture, pace and rhythm, and above all emotional range: how the voice moves when excited, upset, sarcastic "
+    "or scared, with audible breath, laughter, cracks and emphasis where they fit the character. Keep every concrete fact the user gave; "
+    "never change their gender, age or accent. Write it as a description of the person speaking, no markup or tags. "
+    "Also write sample_text: 2-3 spoken sentences (25-40 words, plain words, no tags or stage directions) in the character's own voice "
+    "that swing between at least two emotions. It becomes the reference clip every later line is cloned from, so it must be lively, "
+    "not a flat neutral reading. notes: one short line on what you changed."
+)
+
+
+@app.post("/api/cast/improve-description", tags=["Casting Desk"])
+def api_cast_improve_description(req: CastImproveRequest):
+    """Optional step: a strong Claude model turns a rough description into an emotionally rich VoiceDesign prompt + lively reference line."""
+    if not req.description.strip() and not req.lines:
+        raise HTTPException(status_code=400, detail="Give a rough description (or some lines) to improve.")
+    prompt = f"Character: {req.name}\nRough description: {req.description.strip() or '(none given)'}\n"
+    if req.lines:
+        prompt += "Some of their lines in the script:\n" + "\n".join(f"- {t}" for t in req.lines[:12])
+    try:
+        result = _ask_claude(IMPROVE_SYSTEM, prompt, IMPROVE_SCHEMA, req.model or CLAUDE_IMPROVE_MODEL, timeout=240)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    return {
+        "description": str(result.get("description", "")).strip(),
+        "sample_text": str(result.get("sample_text", "")).strip(),
+        "notes": str(result.get("notes", "")).strip(),
+    }
+
+
+@app.patch("/api/characters/{char_id}", tags=["Character Voice Locker"])
+def api_rename_character(char_id: str, req: RenameCharacterRequest):
+    """Rename a locked character voice."""
+    new_name = req.name.strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="Name cannot be empty.")
+    chars = _read_json(CHARACTERS_JSON, [])
+    target = next((c for c in chars if c["id"] == char_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Character not found.")
+    target["name"] = new_name
+    _write_json(CHARACTERS_JSON, chars)
+    return {"character": target, "characters": chars}
+
+
+@app.get("/api/casts", tags=["Casting Desk"])
+def api_list_casts():
+    """List saved cast setups (script + name-to-voice mapping)."""
+    return {"casts": _read_json(CASTS_JSON, [])}
+
+
+@app.post("/api/casts", tags=["Casting Desk"])
+def api_save_cast(req: SavedCastRequest):
+    """Save (or overwrite by name) a cast setup so a sketch can be re-rendered later with the same voices."""
+    if not req.name.strip():
+        raise HTTPException(status_code=400, detail="Cast name is required.")
+    casts = _read_json(CASTS_JSON, [])
+    existing = next((c for c in casts if c["name"].lower() == req.name.strip().lower()), None)
+    record = req.model_dump()
+    record["name"] = req.name.strip()
+    record["id"] = existing["id"] if existing else f"cast_{int(time.time())}_{uuid.uuid4().hex[:5]}"
+    record["updated_at"] = time.strftime("%Y-%m-%d %H:%M")
+    casts = [c for c in casts if c["id"] != record["id"]]
+    casts.insert(0, record)
+    _write_json(CASTS_JSON, casts)
+    return {"cast": record, "casts": casts}
+
+
+@app.delete("/api/casts/{cast_id}", tags=["Casting Desk"])
+def api_delete_cast(cast_id: str):
+    casts = [c for c in _read_json(CASTS_JSON, []) if c["id"] != cast_id]
+    _write_json(CASTS_JSON, casts)
+    return {"casts": casts}
 
 
 app.mount("/audio/scenes", StaticFiles(directory=str(SCENES_DIR)), name="scenes")

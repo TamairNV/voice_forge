@@ -25,3 +25,4 @@ data/scenes.json
 .vscode/
 .idea/
 *.log
+data/casts.json

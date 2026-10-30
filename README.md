@@ -71,6 +71,12 @@ Every single feature in VoiceForge Studio is accessible over HTTP JSON or direct
 | `GET` | `/api/scenes` | List all stitched multi-character scenes. |
 | `DELETE` | `/api/scenes/{scene_id}` | Delete a stitched scene. |
 | `GET` | `/api/takes` | List recent generated audio takes. |
+| `GET` | `/cast` | **Casting Desk** web page: paste a sketch, cast each character to a voice (or design a new one), render the scene. |
+| `POST` | `/api/cast/extract` | Break a sketch/script into characters + lines with Claude (fast model, default `haiku`), suggesting roster voices. Falls back to the `Name: line` parser. |
+| `POST` | `/api/cast/improve-description` | Optional: a strong Claude model (default `opus`) rewrites a voice description for emotional range and writes a lively reference line. |
+| `GET` | `/api/cast/claude-status` | Whether the server can reach Claude (`ANTHROPIC_API_KEY`, or a signed-in `claude` CLI). |
+| `GET`/`POST`/`DELETE` | `/api/casts` | List, save or delete saved cast setups (script + name-to-voice mapping). |
+| `PATCH` | `/api/characters/{char_id}` | Rename a locked character voice. |
 | `DELETE` | `/api/takes/{take_id}` | Delete a generated take. |
 
 ---

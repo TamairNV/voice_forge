@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VoiceForge Casting Desk</title>
+  <style>
+    :root {
+      --bg-base: #080a0f;
+      --bg-panel: #10141d;
+      --bg-card: #161b28;
+      --bg-card-hover: #1c2233;
+      --bg-input: #0b0e15;
+      --border: #232b3e;
+      --border-light: #2e3852;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --accent-indigo: #6366f1;
+      --accent-violet: #8b5cf6;
+      --accent-emerald: #10b981;
+      --accent-amber: #f59e0b;
+      --accent-rose: #f43f5e;
+      --accent-cyan: #06b6d4;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif;
+      background: radial-gradient(circle at 12% 0%, #161a2e 0%, var(--bg-base) 60%) fixed;
+      color: var(--text-main);
+      font-size: 13px;
+      line-height: 1.45;
+      -webkit-font-smoothing: antialiased;
+    }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-thumb { background: #283147; border-radius: 999px; }
+
+    header {
+      position: sticky; top: 0; z-index: 40;
+      min-height: 54px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 8px 20px; background: rgba(16, 20, 29, 0.92); backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .brand-icon {
+      width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, var(--accent-indigo), var(--accent-violet)); font-weight: 800; font-size: 14px; color: #fff;
+    }
+    .brand-title { font-size: 15px; font-weight: 700; letter-spacing: -0.02em; }
+    .brand-sub { font-size: 11px; color: var(--text-muted); }
+    .header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+      background: var(--bg-card); border: 1px solid var(--border); color: var(--text-muted); font-weight: 500; white-space: nowrap;
+    }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim); }
+    .dot.ok { background: var(--accent-emerald); box-shadow: 0 0 8px var(--accent-emerald); }
+    .dot.bad { background: var(--accent-rose); box-shadow: 0 0 8px var(--accent-rose); }
+    .dot.busy { background: var(--accent-amber); box-shadow: 0 0 8px var(--accent-amber); animation: pulse 0.8s infinite alternate; }
+    @keyframes pulse { from { opacity: 0.35; } to { opacity: 1; } }
+
+    main {
+      display: grid; grid-template-columns: minmax(320px, 420px) 1fr; gap: 16px;
+      padding: 16px 20px 40px; max-width: 1500px; margin: 0 auto;
+    }
+    @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 12px 16px 40px; } }
+    .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+    .panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+    .panel-title {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 10px;
+    }
+    .sticky-col { position: sticky; top: 70px; }
+    @media (max-width: 600px) { header { padding: 8px 16px; } .brand-sub { display: none; } }
+    @media (max-width: 900px) { .sticky-col { position: static; } }
+
+    textarea, input[type=text], input[type=number], select {
+      width: 100%; background: var(--bg-input); border: 1px solid var(--border); color: var(--text-main);
+      border-radius: 8px; padding: 8px 10px; font: inherit; outline: none;
+    }
+    textarea { resize: vertical; line-height: 1.5; }
+    textarea:focus, input:focus, select:focus { border-color: var(--accent-indigo); }
+    #scriptInput { min-height: 260px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+    label.field { display: block; font-size: 11px; color: var(--text-muted); margin: 10px 0 4px; font-weight: 600; }
+
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 14px; border-radius: 8px;
+      font: inherit; font-weight: 600; cursor: pointer; border: 1px solid var(--border-light); background: var(--bg-card); color: var(--text-main);
+      transition: all 0.14s; text-decoration: none; white-space: nowrap;
+    }
+    .btn:hover { border-color: var(--accent-indigo); background: rgba(99, 102, 241, 0.16); }
+    .btn.primary { background: linear-gradient(135deg, var(--accent-indigo), var(--accent-violet)); border-color: transparent; color: #fff; }
+    .btn.primary:hover { filter: brightness(1.1); }
+    .btn.big { padding: 11px 18px; font-size: 14px; }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
+    .btn-sm {
+      padding: 4px 9px; border-radius: 6px; font-size: 11px; font-weight: 600; border: 1px solid var(--border);
+      background: var(--bg-panel); color: var(--text-main); cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
+      white-space: nowrap; text-decoration: none; transition: all 0.14s;
+    }
+    .btn-sm:hover { border-color: var(--accent-indigo); background: rgba(99, 102, 241, 0.16); }
+    .btn-sm.violet { border-color: rgba(139, 92, 246, 0.5); color: #c4b5fd; }
+    .btn-sm.emerald { border-color: rgba(16, 185, 129, 0.45); color: #6ee7b7; }
+    .btn-sm.rose { border-color: rgba(244, 63, 94, 0.4); color: #fda4af; }
+    .btn-sm:disabled { opacity: 0.45; cursor: not-allowed; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .row.tight { gap: 6px; }
+    .muted { color: var(--text-muted); }
+    .dim { color: var(--text-dim); font-size: 11.5px; }
+    .grow { flex: 1; min-width: 0; }
+
+    .cast-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; }
+    .cast-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+    .cast-card.unset { border-color: rgba(245, 158, 11, 0.45); }
+    .cast-card.ready { border-color: rgba(16, 185, 129, 0.35); }
+    .cast-head { display: flex; gap: 8px; align-items: center; }
+    .cast-name { font-size: 14px; font-weight: 700; background: transparent; border-color: transparent; padding: 4px 6px; }
+    .cast-name:hover { border-color: var(--border); }
+    .badge { font-size: 10.5px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-muted); white-space: nowrap; }
+    .badge.ok { color: #6ee7b7; border-color: rgba(16, 185, 129, 0.4); }
+    .badge.warn { color: #fcd34d; border-color: rgba(245, 158, 11, 0.45); }
+    .script-desc { font-size: 11.5px; color: var(--text-muted); font-style: italic; }
+    .newvoice { border-top: 1px dashed var(--border-light); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+    .newvoice textarea { min-height: 84px; font-size: 12px; }
+    .improve-note { font-size: 11px; color: #c4b5fd; }
+
+    .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px 18px; align-items: end; }
+    input[type=range] { width: 100%; accent-color: var(--accent-indigo); }
+    .temp-val { font-variant-numeric: tabular-nums; font-weight: 700; color: #a5b4fc; }
+    .check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); cursor: pointer; }
+
+    .lines { display: flex; flex-direction: column; gap: 6px; }
+    .line-row { display: grid; grid-template-columns: 28px 150px 1fr 170px auto; gap: 6px; align-items: center; }
+    @media (max-width: 1100px) { .line-row { grid-template-columns: 24px 1fr auto; } .line-row .line-text { grid-column: 1 / -1; } .line-row .line-variant { grid-column: 2 / 3; } }
+    .line-idx { color: var(--text-dim); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
+    .line-row select, .line-row input { padding: 6px 8px; font-size: 12px; }
+    .direction { font-size: 10.5px; color: #fcd34d; }
+
+    .result { display: flex; flex-direction: column; gap: 10px; }
+    audio { width: 100%; height: 36px; }
+    .seg { display: grid; grid-template-columns: 28px 120px 1fr auto; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 8px; background: var(--bg-card); }
+    .seg .spk { font-weight: 700; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .seg .txt { font-size: 12px; color: var(--text-muted); }
+    .empty { padding: 26px; text-align: center; color: var(--text-dim); border: 1px dashed var(--border-light); border-radius: 10px; }
+    .warn-box { padding: 8px 10px; border-radius: 8px; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.35); color: #fcd34d; font-size: 12px; }
+    .toast {
+      position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%) translateY(20px); opacity: 0; pointer-events: none;
+      background: var(--bg-card); border: 1px solid var(--border-light); padding: 9px 14px; border-radius: 10px; transition: all 0.2s; z-index: 99; max-width: 90vw;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .spinner { width: 13px; height: 13px; border: 2px solid rgba(255,255,255,0.25); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="brand-icon">VF</div>
+      <div>
+        <div class="brand-title">Casting Desk</div>
+        <div class="brand-sub">Paste a sketch, cast the voices, render the scene</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <span class="pill" id="claudePill" title="Claude is used to break down scripts and improve voice descriptions"><span class="dot" id="claudeDot"></span><span id="claudeText">Checking Claude…</span></span>
+      <span class="pill"><span class="dot" id="ttsDot"></span><span id="ttsText">TTS</span></span>
+      <a class="btn-sm" href="/">← Studio</a>
+    </div>
+  </header>
+
+  <main>
+    <!-- LEFT: script input + saved casts -->
+    <div class="col">
+      <div class="panel sticky-col">
+        <div class="panel-title">
+          <span>1 · Script or sketch</span>
+          <button class="btn-sm" onclick="loadExample()">Example</button>
+        </div>
+        <textarea id="scriptInput" placeholder="Paste a sketch, a few lines (Name: line), or rough story notes…"></textarea>
+        <div class="row" style="margin-top: 10px;">
+          <button class="btn primary grow" id="extractBtn" onclick="extractCast(true)">✨ Extract cast with Claude</button>
+          <button class="btn" onclick="extractCast(false)" title="Offline: only understands `Name: line` scripts">Parse only</button>
+        </div>
+        <div class="dim" style="margin-top: 6px;">Extraction uses a fast model (<span id="extractModel">haiku</span>). It also splits out stage directions and suggests voices from your roster.</div>
+        <div id="extractWarn" class="warn-box" style="display:none; margin-top: 8px;"></div>
+
+        <label class="field">Scene title</label>
+        <input type="text" id="sceneTitle" placeholder="Untitled Scene" />
+
+        <div class="panel-title" style="margin-top: 16px;"><span>Saved casts</span></div>
+        <div class="row tight">
+          <select id="savedSelect" class="grow"><option value="">— none saved yet —</option></select>
+          <button class="btn-sm" onclick="loadSavedCast()">Load</button>
+          <button class="btn-sm rose" onclick="deleteSavedCast()">Delete</button>
+        </div>
+        <button class="btn" style="margin-top: 8px; width: 100%;" onclick="saveCast()">💾 Save this cast</button>
+      </div>
+    </div>
+
+    <!-- RIGHT: casting, settings, lines, result -->
+    <div class="col">
+      <div class="panel">
+        <div class="panel-title">
+          <span>2 · Cast the voices <span id="castCount" class="badge" style="margin-left: 6px;">0</span></span>
+          <span class="dim" style="text-transform: none; letter-spacing: 0;">Pick an existing voice, or make a new one</span>
+        </div>
+        <div id="castGrid" class="cast-grid"><div class="empty">Extract a script to see its characters here.</div></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title"><span>3 · Settings</span></div>
+        <div class="settings-grid">
+          <div>
+            <div class="row" style="justify-content: space-between; margin-bottom: 4px;">
+              <span class="muted" style="font-size: 11px; font-weight: 600;">Temperature <span class="temp-val" id="tempVal">auto</span></span>
+              <label class="check"><input type="checkbox" id="tempAuto" checked onchange="syncTemp()" /> Auto</label>
+            </div>
+            <input type="range" id="tempSlider" min="0.3" max="1.2" step="0.01" value="0.58" oninput="syncTemp()" disabled />
+            <div class="dim">Auto keeps the defaults (clone 0.58, new voices 0.85, plus the boost on emotional lines). Higher is wilder.</div>
+          </div>
+          <div>
+            <label class="field" style="margin-top: 0;">Gap between lines (ms)</label>
+            <input type="number" id="pauseMs" value="280" min="-2000" max="5000" step="20" />
+          </div>
+          <div>
+            <label class="check"><input type="checkbox" id="continuity" checked /> Context continuity</label>
+            <div class="dim">Each line hears the speaker's previous line so delivery flows.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">
+          <span>4 · Lines <span id="lineCount" class="badge" style="margin-left: 6px;">0</span></span>
+          <button class="btn-sm" onclick="addLine()">+ Add line</button>
+        </div>
+        <div class="dim" style="margin-bottom: 8px;">Edit the text, change who says it, or swap one line onto another voice (handy for emotion variants like "Phoebe Panicked").</div>
+        <div id="linesList" class="lines"><div class="empty">No lines yet.</div></div>
+        <div class="row" style="margin-top: 14px;">
+          <button class="btn primary big grow" id="renderBtn" onclick="renderScene()">🎬 Generate scene</button>
+        </div>
+        <div id="renderHint" class="dim" style="margin-top: 6px;"></div>
+      </div>
+
+      <div class="panel" id="resultPanel" style="display: none;">
+        <div class="panel-title">
+          <span>5 · Result</span>
+          <span class="row tight" id="resultLinks"></span>
+        </div>
+        <div class="result" id="resultBody"></div>
+      </div>
+    </div>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const DEFAULT_SAMPLE = "Keep your eyes sharp. Nothing in this sector is what it seems, and we only get one shot at this.";
+    const state = {
+      roster: [],          // locked voices from /api/characters
+      cast: [],            // {key, scriptName, name, description, voiceId, newVoice: {open, description, sample, notes, busy}}
+      lines: [],           // {speaker (cast key), text, direction, variantId}
+      saved: [],
+      scene: null,
+    };
+    let player = null;
+    let claudeOk = false;
+
+    function $(id) { return document.getElementById(id); }
+    function escapeHtml(str) {
+      return String(str ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    }
+    function toast(msg, ms = 3200) {
+      const t = $('toast'); t.textContent = msg; t.classList.add('show');
+      clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), ms);
+    }
+    async function api(path, opts = {}) {
+      const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+      let data = null;
+      try { data = await res.json(); } catch (e) { /* non-JSON */ }
+      if (!res.ok) {
+        const detail = data && data.detail ? (typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)) : res.statusText;
+        throw new Error(detail);
+      }
+      return data;
+    }
+    function play(url) {
+      if (player) { player.pause(); }
+      player = new Audio(url + (url.includes('?') ? '' : '?t=' + Date.now()));
+      player.play().catch(e => toast('Could not play: ' + e.message));
+    }
+    function voiceById(id) { return state.roster.find(c => c.id === id); }
+    function castByKey(key) { return state.cast.find(c => c.key === key); }
+    function tempValue() { return $('tempAuto').checked ? null : parseFloat($('tempSlider').value); }
+    function syncTemp() {
+      const auto = $('tempAuto').checked;
+      $('tempSlider').disabled = auto;
+      $('tempVal').textContent = auto ? 'auto' : parseFloat($('tempSlider').value).toFixed(2);
+    }
+
+    // Remember which voice each script name was last cast as
+    function rememberedVoice(name) {
+      try { return JSON.parse(localStorage.getItem('vf_cast_memory') || '{}')[name.toLowerCase()] || ''; } catch (e) { return ''; }
+    }
+    function rememberVoice(name, voiceId) {
+      try {
+        const m = JSON.parse(localStorage.getItem('vf_cast_memory') || '{}');
+        if (voiceId) m[name.toLowerCase()] = voiceId;
+        localStorage.setItem('vf_cast_memory', JSON.stringify(m));
+      } catch (e) { /* storage unavailable */ }
+    }
+
+    // ---------------------------------------------------------------- status
+    async function loadStatus() {
+      try {
+        const s = await api('/api/cast/claude-status');
+        claudeOk = s.available;
+        $('claudeDot').className = 'dot ' + (s.available ? 'ok' : 'bad');
+        $('claudeText').textContent = s.available ? `Claude ready (${s.via})` : 'Claude offline';
+        $('claudePill').title = s.detail || '';
+        if (s.extract_model) $('extractModel').textContent = s.extract_model;
+      } catch (e) {
+        $('claudeDot').className = 'dot bad'; $('claudeText').textContent = 'Claude offline';
+      }
+      try {
+        const st = await api('/api/health');
+        $('ttsDot').className = 'dot ok';
+        $('ttsText').textContent = 'TTS: ' + (st.active_model_id || st.active_model || 'idle');
+      } catch (e) { $('ttsDot').className = 'dot bad'; }
+    }
+    async function loadRoster() {
+      const d = await api('/api/characters');
+      state.roster = d.characters || [];
+    }
+    async function loadSaved() {
+      const d = await api('/api/casts');
+      state.saved = d.casts || [];
+      const sel = $('savedSelect');
+      sel.innerHTML = state.saved.length
+        ? state.saved.map(c => `<option value="${c.id}">${escapeHtml(c.name)} · ${escapeHtml(c.updated_at || '')}</option>`).join('')
+        : '<option value="">— none saved yet —</option>';
+    }
+
+    // --------------------------------------------------------------- extract
+    async function extractCast(useClaude) {
+      const script = $('scriptInput').value.trim();
+      if (!script) { toast('Paste a script first.'); return; }
+      const btn = $('extractBtn');
+      btn.disabled = true;
+      const label = btn.innerHTML;
+      if (useClaude) btn.innerHTML = '<span class="spinner"></span> Reading the script…';
+      $('extractWarn').style.display = 'none';
+      try {
+        await loadRoster();
+        const d = await api('/api/cast/extract', { method: 'POST', body: JSON.stringify({ script, use_claude: useClaude }) });
+        if (d.warning) { $('extractWarn').textContent = d.warning; $('extractWarn').style.display = 'block'; }
+        if (!$('sceneTitle').value.trim() || $('sceneTitle').dataset.auto === '1') {
+          $('sceneTitle').value = d.title || ''; $('sceneTitle').dataset.auto = '1';
+        }
+        state.cast = d.characters.map(c => {
+          const voiceId = rememberedVoice(c.name) && voiceById(rememberedVoice(c.name)) ? rememberedVoice(c.name) : (c.suggested_voice_id || '');
+          return {
+            key: c.name, scriptName: c.name, name: c.name, description: c.description || '', voiceId,
+            newVoice: { open: !voiceId, description: c.description || '', sample: '', notes: '', busy: false },
+          };
+        });
+        state.lines = d.lines.map(l => ({ speaker: l.speaker, text: l.text, direction: l.direction || '', variantId: '' }));
+        // Map speakers to cast keys case-insensitively
+        state.lines.forEach(l => {
+          const c = state.cast.find(x => x.key.toLowerCase() === l.speaker.toLowerCase());
+          if (c) l.speaker = c.key;
+        });
+        renderAll();
+        toast(`Found ${state.cast.length} characters and ${state.lines.length} lines` + (d.via === 'parser' ? ' (built-in parser)' : ''));
+      } catch (e) {
+        toast('Extract failed: ' + e.message, 6000);
+      } finally {
+        btn.disabled = false; btn.innerHTML = label;
+      }
+    }
+
+    // ----------------------------------------------------------------- cast
+    function voiceOptions(selected, includeNew = true, emptyLabel = '— choose a voice —') {
+      const opts = [`<option value="">${emptyLabel}</option>`];
+      if (includeNew) opts.push(`<option value="__new__" ${selected === '__new__' ? 'selected' : ''}>➕ New voice…</option>`);
+      state.roster.forEach(v => opts.push(`<option value="${v.id}" ${v.id === selected ? 'selected' : ''}>${escapeHtml(v.name)}</option>`));
+      return opts.join('');
+    }
+    function linesFor(key) { return state.lines.filter(l => l.speaker === key); }
+
+    function renderCast() {
+      $('castCount').textContent = state.cast.length;
+      const grid = $('castGrid');
+      if (!state.cast.length) { grid.innerHTML = '<div class="empty">Extract a script to see its characters here.</div>'; return; }
+      grid.innerHTML = state.cast.map((c, i) => {
+        const v = voiceById(c.voiceId);
+        const n = linesFor(c.key).length;
+        const nv = c.newVoice;
+        const showNew = nv.open || !v;
+        return `
+        <div class="cast-card ${v ? 'ready' : 'unset'}">
+          <div class="cast-head">
+            <input type="text" class="cast-name grow" value="${escapeHtml(c.name)}" title="Rename this character in the scene" onchange="renameCast(${i}, this.value)" />
+            <span class="badge">${n} line${n === 1 ? '' : 's'}</span>
+            <span class="badge ${v ? 'ok' : 'warn'}">${v ? 'cast' : 'needs voice'}</span>
+          </div>
+          ${c.description ? `<div class="script-desc">From the script: ${escapeHtml(c.description)}</div>` : ''}
+          <div class="row tight">
+            <select class="grow" onchange="pickVoice(${i}, this.value)">${voiceOptions(v ? c.voiceId : (showNew ? '__new__' : ''))}</select>
+            <button class="btn-sm" ${v ? '' : 'disabled'} onclick="play('${v ? v.url : ''}')" title="Play this voice's reference clip">▶ Preview</button>
+          </div>
+          ${v ? `
+          <div class="row tight">
+            <span class="dim grow" title="${escapeHtml(v.description || '')}">${escapeHtml((v.description || '').slice(0, 90))}${(v.description || '').length > 90 ? '…' : ''}</span>
+            <button class="btn-sm" onclick="tryLine(${i}, this)" ${n ? '' : 'disabled'} title="Speak this character's first line in the chosen voice">🗣 Try line</button>
+            <button class="btn-sm" onclick="renameVoice('${v.id}')" title="Rename the saved voice in your roster">✏️ Rename voice</button>
+          </div>` : ''}
+          ${showNew ? `
+          <div class="newvoice">
+            <label class="field" style="margin: 0;">New voice description</label>
+            <textarea oninput="state.cast[${i}].newVoice.description = this.value" placeholder="e.g. 30s woman, Glaswegian, sharp and sarcastic, talks fast">${escapeHtml(nv.description)}</textarea>
+            <label class="field" style="margin: 0;">Reference line it speaks (optional)</label>
+            <input type="text" oninput="state.cast[${i}].newVoice.sample = this.value" value="${escapeHtml(nv.sample)}" placeholder="${escapeHtml(DEFAULT_SAMPLE)}" />
+            ${nv.notes ? `<div class="improve-note">✨ ${escapeHtml(nv.notes)}</div>` : ''}
+            <div class="row tight">
+              <button class="btn-sm violet" onclick="improveVoice(${i}, this)" ${nv.busy ? 'disabled' : ''} title="Optional: a strong Claude model rewrites the description for more emotion and writes a lively reference line">✨ Improve for emotion</button>
+              <button class="btn-sm emerald" onclick="createVoice(${i}, this)" ${nv.busy ? 'disabled' : ''}>🎙 Create voice</button>
+              ${v ? `<button class="btn-sm" onclick="state.cast[${i}].newVoice.open = false; renderCast()">Cancel</button>` : ''}
+            </div>
+          </div>` : `<div><button class="btn-sm" onclick="state.cast[${i}].newVoice.open = true; renderCast()">➕ Make a new voice instead</button></div>`}
+        </div>`;
+      }).join('');
+    }
+
+    function pickVoice(i, value) {
+      const c = state.cast[i];
+      if (value === '__new__') { c.newVoice.open = true; c.voiceId = ''; }
+      else { c.voiceId = value; c.newVoice.open = !value; if (value) rememberVoice(c.scriptName, value); }
+      renderAll();
+    }
+    function renameCast(i, value) {
+      const c = state.cast[i];
+      const name = value.trim();
+      if (!name) { renderCast(); return; }
+      if (state.cast.some((x, j) => j !== i && x.name.toLowerCase() === name.toLowerCase())) {
+        toast('Another character already has that name. Merging lines into them.');
+        const target = state.cast.find((x, j) => j !== i && x.name.toLowerCase() === name.toLowerCase());
+        state.lines.forEach(l => { if (l.speaker === c.key) l.speaker = target.key; });
+        state.cast.splice(i, 1);
+      } else {
+        c.name = name;
+      }
+      renderAll();
+    }
+    async function renameVoice(voiceId) {
+      const v = voiceById(voiceId);
+      const name = prompt('Rename this saved voice in your roster:', v ? v.name : '');
+      if (!name || !name.trim()) return;
+      try {
+        const d = await api(`/api/characters/${voiceId}`, { method: 'PATCH', body: JSON.stringify({ name: name.trim() }) });
+        state.roster = d.characters;
+        renderAll();
+        toast('Voice renamed.');
+      } catch (e) { toast('Rename failed: ' + e.message); }
+    }
+    async function improveVoice(i, btn) {
+      const c = state.cast[i];
+      const nv = c.newVoice;
+      nv.busy = true; btn.innerHTML = '<span class="spinner"></span> Improving…'; btn.disabled = true;
+      try {
+        const d = await api('/api/cast/improve-description', {
+          method: 'POST',
+          body: JSON.stringify({ name: c.name, description: nv.description || c.description, lines: linesFor(c.key).map(l => l.text) }),
+        });
+        nv.description = d.description; nv.sample = d.sample_text; nv.notes = d.notes || 'Description improved.';
+        toast('Description improved. Review it, then create the voice.');
+      } catch (e) { toast('Improve failed: ' + e.message, 6000); }
+      nv.busy = false; renderCast();
+    }
+    async function createVoice(i, btn) {
+      const c = state.cast[i];
+      const nv = c.newVoice;
+      const instruct = (nv.description || '').trim();
+      if (!instruct) { toast('Write a description for the new voice first.'); return; }
+      nv.busy = true; btn.innerHTML = '<span class="spinner"></span> Designing voice…'; btn.disabled = true;
+      setTts(true, 'Designing ' + c.name);
+      try {
+        const d = await api('/api/characters/design-and-lock', {
+          method: 'POST',
+          body: JSON.stringify({ name: c.name, instruct, sample_text: (nv.sample || '').trim() || DEFAULT_SAMPLE, temperature: tempValue() }),
+        });
+        state.roster = d.characters;
+        c.voiceId = d.character.id;
+        nv.open = false; nv.notes = '';
+        rememberVoice(c.scriptName, c.voiceId);
+        play(d.character.url);
+        toast(`Created and locked "${d.character.name}". Playing it now.`);
+      } catch (e) { toast('Create failed: ' + e.message, 6000); }
+      nv.busy = false; setTts(false); renderAll();
+    }
+    async function tryLine(i, btn) {
+      const c = state.cast[i];
+      const line = linesFor(c.key)[0];
+      if (!line || !c.voiceId) return;
+      btn.innerHTML = '<span class="spinner"></span>'; btn.disabled = true;
+      setTts(true, c.name + ' trying a line');
+      try {
+        const d = await api('/api/synthesize', {
+          method: 'POST',
+          body: JSON.stringify({ model_id: 'qwen3_clone', character_id: c.voiceId, text: line.text, temperature: tempValue() }),
+        });
+        play(d.take.url);
+      } catch (e) { toast('Try line failed: ' + e.message, 6000); }
+      setTts(false); renderCast();
+    }
+    function setTts(busy, label = '') {
+      $('ttsDot').className = 'dot ' + (busy ? 'busy' : 'ok');
+      if (busy) $('ttsText').textContent = label + '…'; else loadStatus();
+    }
+
+    // ---------------------------------------------------------------- lines
+    function renderLines() {
+      $('lineCount').textContent = state.lines.length;
+      const list = $('linesList');
+      if (!state.lines.length) { list.innerHTML = '<div class="empty">No lines yet.</div>'; updateRenderHint(); return; }
+      const speakerOpts = sel => state.cast.map(c => `<option value="${escapeHtml(c.key)}" ${c.key === sel ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
+      list.innerHTML = state.lines.map((l, i) => `
+        <div class="line-row">
+          <span class="line-idx">${i + 1}</span>
+          <select onchange="state.lines[${i}].speaker = this.value; renderCast(); updateRenderHint()">${speakerOpts(l.speaker)}</select>
+          <div class="line-text">
+            <input type="text" value="${escapeHtml(l.text)}" oninput="state.lines[${i}].text = this.value" />
+            ${l.direction ? `<div class="direction">(${escapeHtml(l.direction)})</div>` : ''}
+          </div>
+          <select class="line-variant" title="Use a different voice for just this line" onchange="state.lines[${i}].variantId = this.value">${voiceOptions(l.variantId, false, '↳ cast voice')}</select>
+          <span class="row tight">
+            <button class="btn-sm" title="Move up" onclick="moveLine(${i}, -1)">↑</button>
+            <button class="btn-sm rose" title="Delete line" onclick="state.lines.splice(${i}, 1); renderAll()">✕</button>
+          </span>
+        </div>`).join('');
+      updateRenderHint();
+    }
+    function moveLine(i, dir) {
+      const j = i + dir;
+      if (j < 0 || j >= state.lines.length) return;
+      [state.lines[i], state.lines[j]] = [state.lines[j], state.lines[i]];
+      renderLines();
+    }
+    function addLine() {
+      if (!state.cast.length) {
+        state.cast.push({ key: 'Narrator', scriptName: 'Narrator', name: 'Narrator', description: '', voiceId: '', newVoice: { open: true, description: '', sample: '', notes: '', busy: false } });
+      }
+      state.lines.push({ speaker: state.cast[0].key, text: '', direction: '', variantId: '' });
+      renderAll();
+    }
+    function uncastSpeakers() {
+      const used = new Set(state.lines.filter(l => !l.variantId).map(l => l.speaker));
+      return state.cast.filter(c => used.has(c.key) && !voiceById(c.voiceId));
+    }
+    function updateRenderHint() {
+      const missing = uncastSpeakers();
+      $('renderBtn').disabled = !state.lines.length || missing.length > 0;
+      $('renderHint').textContent = !state.lines.length ? '' : missing.length
+        ? 'Still needs a voice: ' + missing.map(c => c.name).join(', ')
+        : `${state.lines.length} lines, ${new Set(state.lines.map(l => l.speaker)).size} speakers. Rendering takes a little while; the first line loads the clone model.`;
+    }
+    function renderAll() { renderCast(); renderLines(); }
+
+    // --------------------------------------------------------------- render
+    function buildSceneRequest() {
+      const cast = {};
+      const lines = [];
+      state.lines.forEach(l => {
+        const c = castByKey(l.speaker);
+        if (!c || !l.text.trim()) return;
+        let speaker = c.name;
+        let voiceId = c.voiceId;
+        if (l.variantId && l.variantId !== c.voiceId) {
+          const v = voiceById(l.variantId);
+          // "Phoebe Panicked" on Phoebe's line reads as "Phoebe (Panicked)"
+          let label = v ? v.name : 'variant';
+          if (label.toLowerCase().startsWith(c.name.toLowerCase() + ' ')) label = label.slice(c.name.length + 1);
+          speaker = `${c.name} (${label})`;
+          voiceId = l.variantId;
+        }
+        cast[speaker] = { character_id: voiceId };
+        lines.push({ speaker, text: l.text.trim() });
+      });
+      return {
+        title: $('sceneTitle').value.trim() || 'Untitled Scene',
+        cast, lines,
+        default_pause_ms: parseInt($('pauseMs').value || '280', 10),
+        temperature: tempValue(),
+        context_continuity: $('continuity').checked,
+      };
+    }
+    async function renderScene() {
+      const req = buildSceneRequest();
+      if (!req.lines.length) { toast('No lines to render.'); return; }
+      state.cast.forEach(c => rememberVoice(c.scriptName, c.voiceId));
+      const btn = $('renderBtn');
+      btn.disabled = true;
+      const started = Date.now();
+      const tick = setInterval(() => { btn.innerHTML = `<span class="spinner"></span> Rendering ${req.lines.length} lines… ${Math.round((Date.now() - started) / 1000)}s`; }, 500);
+      setTts(true, 'Rendering scene');
+      try {
+        const d = await api('/api/scenes/render', { method: 'POST', body: JSON.stringify(req) });
+        state.roster = d.characters || state.roster;
+        state.scene = d.scene;
+        showResult(true);
+        toast(`Scene ready: ${d.scene.duration_sec}s, rendered in ${d.scene.elapsed_sec}s.`);
+      } catch (e) {
+        toast('Render failed: ' + e.message, 7000);
+      } finally {
+        clearInterval(tick);
+        btn.innerHTML = '🎬 Generate scene';
+        setTts(false);
+        updateRenderHint();
+      }
+    }
+    function showResult(autoplay) {
+      const s = state.scene;
+      if (!s) return;
+      $('resultPanel').style.display = 'block';
+      $('resultLinks').innerHTML = `
+        <a class="btn-sm" href="${s.url}" download>⬇ WAV</a>
+        <a class="btn-sm" href="/api/scenes/${s.id}/subtitles.srt" download>SRT</a>
+        <a class="btn-sm" href="/api/scenes/${s.id}/export.zip">⬇ ZIP bundle</a>`;
+      $('resultBody').innerHTML = `
+        <div class="row"><strong>${escapeHtml(s.title)}</strong><span class="dim">${s.duration_sec}s · ${s.line_count} lines · rendered in ${s.elapsed_sec}s</span></div>
+        <audio id="sceneAudio" controls src="${s.url}?t=${Date.now()}"></audio>
+        ${s.segments.map(seg => `
+          <div class="seg">
+            <span class="line-idx">${seg.index}</span>
+            <span class="spk" title="${escapeHtml(seg.speaker)}">${escapeHtml(seg.speaker)}</span>
+            <span class="txt">${escapeHtml(seg.text)}</span>
+            <span class="row tight">
+              <button class="btn-sm" onclick="play('${seg.take_url}')" title="Play just this line">▶</button>
+              <button class="btn-sm violet" onclick="rerollLine(${seg.index}, this)" title="Re-generate this line with a fresh take and re-stitch the scene">🎲 Re-roll</button>
+            </span>
+          </div>`).join('')}`;
+      if (autoplay) { const a = $('sceneAudio'); a.play().catch(() => {}); }
+      $('resultPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    async function rerollLine(index, btn) {
+      const s = state.scene;
+      btn.innerHTML = '<span class="spinner"></span>'; btn.disabled = true;
+      setTts(true, 'Re-rolling line ' + index);
+      try {
+        const body = { line_index: index, seed: Math.floor(Math.random() * 1e9) };
+        const t = tempValue(); if (t !== null) body.temperature = t;
+        const d = await api(`/api/scenes/${s.id}/reroll-line`, { method: 'POST', body: JSON.stringify(body) });
+        state.scene = d.scene || s;
+        showResult(false);
+        const seg = state.scene.segments.find(x => x.index === index);
+        if (seg) play(seg.take_url);
+        toast('Line ' + index + ' re-rolled and scene re-stitched.');
+      } catch (e) { toast('Re-roll failed: ' + e.message, 6000); renderResultButtons(); }
+      setTts(false);
+    }
+    function renderResultButtons() { showResult(false); }
+
+    // ---------------------------------------------------------- saved casts
+    async function saveCast() {
+      if (!state.cast.length) { toast('Nothing to save yet.'); return; }
+      const name = prompt('Save this cast as:', $('sceneTitle').value.trim() || 'My cast');
+      if (!name || !name.trim()) return;
+      try {
+        await api('/api/casts', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: name.trim(),
+            script: $('scriptInput').value,
+            title: $('sceneTitle').value,
+            mapping: state.cast.map(c => ({ name: c.name, script_name: c.scriptName, key: c.key, voice_id: c.voiceId, description: c.description })),
+            lines: state.lines,
+            temperature: tempValue(),
+          }),
+        });
+        await loadSaved();
+        toast('Cast saved.');
+      } catch (e) { toast('Save failed: ' + e.message); }
+    }
+    async function loadSavedCast() {
+      const id = $('savedSelect').value;
+      const c = state.saved.find(x => x.id === id);
+      if (!c) return;
+      await loadRoster();
+      $('scriptInput').value = c.script || '';
+      $('sceneTitle').value = c.title || ''; $('sceneTitle').dataset.auto = '0';
+      state.cast = (c.mapping || []).map(m => ({
+        key: m.key || m.name, scriptName: m.script_name || m.name, name: m.name, description: m.description || '',
+        voiceId: voiceById(m.voice_id) ? m.voice_id : '',
+        newVoice: { open: !voiceById(m.voice_id), description: m.description || '', sample: '', notes: '', busy: false },
+      }));
+      state.lines = (c.lines || []).map(l => ({ speaker: l.speaker, text: l.text, direction: l.direction || '', variantId: l.variantId || '' }));
+      if (c.temperature !== null && c.temperature !== undefined) { $('tempAuto').checked = false; $('tempSlider').value = c.temperature; }
+      else { $('tempAuto').checked = true; }
+      syncTemp();
+      renderAll();
+      toast('Loaded "' + c.name + '".');
+    }
+    async function deleteSavedCast() {
+      const id = $('savedSelect').value;
+      if (!id || !confirm('Delete this saved cast? (Voices are kept.)')) return;
+      await api(`/api/casts/${id}`, { method: 'DELETE' });
+      await loadSaved();
+      toast('Saved cast deleted.');
+    }
+
+    function loadExample() {
+      $('scriptInput').value = `INT. STUDENT FLAT - NIGHT
+
+DAVE stares at the fridge. Someone has eaten his yoghurt again.
+
+DAVE: Right. Who ate it?
+MARK (not looking up from his phone): Ate what?
+DAVE: The yoghurt, Mark. The one with my name on it. In marker.
+BOBBY: Technically it said "Dav". So it could've been anyone's.
+DAVE (losing it): WHO ELSE IS CALLED DAV, BOBBY?
+MARK: ...Dav from upstairs?`;
+      $('sceneTitle').dataset.auto = '1';
+    }
+
+    $('sceneTitle').addEventListener('input', () => { $('sceneTitle').dataset.auto = '0'; });
+    syncTemp();
+    renderAll();
+    Promise.all([loadStatus(), loadRoster(), loadSaved()]).catch(e => toast('Could not reach the server: ' + e.message));
+  </script>
+</body>
+</html>
