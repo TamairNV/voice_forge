@@ -66,11 +66,16 @@ Qwen3-TTS Base uses In-Context Learning (ICL) over the reference audio (`ref_aud
 
 ### 5. LOW-FRICTION MULTI-CHARACTER SKIT SCRIPT SYNTAX (`POST /api/scenes/render`)
 To generate a complete multi-character game skit in a single call, send `POST http://127.0.0.1:7860/api/scenes/render`:
-- **Automatic Cast Reuse & Creation**:
+- **Automatic Cast Reuse, Audio Ingestion & Creation**:
   - If a speaker name (e.g., `Torvin`) is already in `/api/characters`, VoiceForge automatically reuses their locked voice (`qwen3_clone`).
-  - If a speaker name is new, VoiceForge automatically designs their voice, locks a clean Golden Reference into `/api/characters`, and renders all their lines consistently!
+  - **Using Audio Recordings Directly**:
+    - Pass in `cast`: `"cast": { "Player": "/path/to/user_voice.m4a" }` or `"cast": { "Player": {"audio": "/path/to/clip.wav", "ref_text": "Spoken text..."} }`
+    - Or inline in script text: `Player [ref: /path/to/clip.wav]: Dialogue text here`
+    - VoiceForge automatically converts the recording to 24kHz mono WAV, auto-transcribes with on-device Whisper if `ref_text` is omitted, and locks it into the Character Locker!
+  - If a speaker name is new and no recording is provided, VoiceForge automatically designs their voice from `instruct`, locks a clean Golden Reference into `/api/characters`, and renders all their lines consistently!
 - **Inline Stage Directions in `script_text`**:
   - `Speaker (voice description for new character) [temp 0.45, top_p 0.80, seed 42, overlap 200ms]: Dialogue text`
+  - `Speaker [ref: /path/to/audio.wav]: Dialogue text using cloned voice from recording`
   - Standalone timing lines between turns:
     - `[Pause: 450ms]` or `[pause 1.5s]` — adds a dramatic silence beat after the previous line.
     - `[Overlap: 220ms]` — makes the next speaker interrupt 220ms *before* the previous line finishes!
@@ -80,8 +85,10 @@ To generate a complete multi-character game skit in a single call, send `POST ht
 {
   "title": "Vault Heist Interruption",
   "default_pause_ms": 240,
-  "speed": 1.15,
-  "script_text": "Nyx (sharp witty 28-year-old female rogue, sleek British accent, medium-low husky pitch, brisk pacing) [1.20x]: The security relay is cycling down, just give me ten more seconds on this terminal—\n[Overlap: 220ms]\nTorvin (cynical 60s male dwarven blacksmith, Scottish accent, deep gravelly baritone) [1.25x]: Ten seconds?! The iron golems are already coming down the corridor!\nNyx [maya1, 1.20x]: <laugh> Relax, old man! Pull the red lever right now!"
+  "cast": {
+    "User": "/path/to/user_recording.m4a"
+  },
+  "script_text": "Nyx (sharp witty 28-year-old female rogue, sleek British accent, medium-low husky pitch, brisk pacing) [1.20x]: The security relay is cycling down, just give me ten more seconds on this terminal—\n[Overlap: 220ms]\nUser: Ten seconds?! The iron golems are already coming down the corridor!\nNyx [maya1, 1.20x]: <laugh> Relax! Pull the red lever right now!"
 }
 ```
 
@@ -89,6 +96,8 @@ To generate a complete multi-character game skit in a single call, send `POST ht
 - `GET  /api/status` — Active model, VRAM telemetry, locked characters, recent takes, and stitched scenes.
 - `GET  /api/llm-guide` — Returns this complete LLM prompt-engineering guide & JSON schema reference.
 - `POST /api/prompts/optimize` — `{ "name": "Doc Viktor", "concept": "sketchy cyberpunk ripperdoc" }` -> returns optimized 7-dimension `instruct_qwen`, `instruct_maya`, and a 10s `golden_sample_qwen`.
+- `POST /api/characters/from-recording` — `{ "name": "...", "audio_path": "/path/to/audio.m4a", "ref_text": "..." (optional) }` -> Ingests any audio format, extracts 24kHz reference, transcribes via on-device Whisper if needed, and locks character voice.
+- `POST /api/characters/upload` — Multipart file upload + name for manual UI or drag-and-drop recording ingestion.
 - `POST /api/characters/design-and-lock` — `{ "name": "...", "instruct": "...", "sample_text": "..." }` -> designs & locks a reusable NPC voice in one call.
 - `POST /api/synthesize` (or `/api/synthesize/wav`) — Synthesize a single line (`model_id`, `text`, `instruct`, `character_id`, `speed`).
 - `POST /api/scenes/render` (or `/api/scenes/render/wav`) — Render & stitch a multi-character skit (with 2-pass smart engine batching, `.srt` subtitles, and `manifest.json`).

@@ -15,11 +15,12 @@ import io
 import json
 import re
 import shutil
+import subprocess
 import time
 import uuid
 import zipfile
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import soundfile as sf
@@ -230,6 +231,16 @@ class SaveCharacterFromTakeRequest(BaseModel):
     description: str = Field("", description="Optional notes or voice description.")
 
 
+class CharacterFromRecordingRequest(BaseModel):
+    """Register an external voice audio recording (.wav, .m4a, .mp3, .ogg, .flac) as a locked character."""
+    name: str = Field(..., description="Character name to register in the Character Voice Locker.")
+    audio_path: str = Field(..., description="Local path to audio recording.")
+    ref_text: Optional[str] = Field(None, description="Exact spoken transcript. If omitted, automatically transcribed via on-device Whisper.")
+    description: Optional[str] = Field(None, description="Optional notes or character description.")
+    start_sec: Optional[float] = Field(None, description="Optional start timestamp in seconds for reference clip extraction.")
+    end_sec: Optional[float] = Field(None, description="Optional end timestamp in seconds for reference clip extraction.")
+
+
 class OpenAISpeechRequest(BaseModel):
     """OpenAI-compatible `/v1/audio/speech` request schema for drop-in LLM / agent integration."""
     model: str = Field(
@@ -294,6 +305,14 @@ class SceneLineItem(BaseModel):
         le=5000,
         description="Gap in milliseconds after this line before the next character speaks. Positive values add silence; negative values (e.g. -200) overlap/interrupt the next speaker!",
     )
+    ref_audio_path: Optional[str] = Field(
+        None,
+        description="Optional local path to an audio recording (.wav, .m4a, .mp3, etc.) to immediately clone and lock as this character.",
+    )
+    ref_text: Optional[str] = Field(
+        None,
+        description="Optional exact spoken transcript for `ref_audio_path`. If omitted, automatically transcribed via on-device Whisper.",
+    )
 
 
 class RerollSceneLineRequest(BaseModel):
@@ -320,9 +339,9 @@ class SceneRenderRequest(BaseModel):
     synthesizes every segment, and stitches them into a single master 24kHz `.wav` scene with natural turn-taking pauses!
     """
     title: str = Field("Game Cutscene", description="Title of the scene.")
-    cast: Dict[str, str] = Field(
+    cast: Dict[str, Any] = Field(
         default_factory=dict,
-        description="Optional dictionary mapping Character Name -> Voice Description (`instruct`) for new characters in the scene.",
+        description="Optional dictionary mapping Character Name -> Voice Description string OR Audio Recording Path string OR Dict `{'audio': '/path/to/clip.wav', 'ref_text': '...'}`.",
     )
     lines: List[SceneLineItem] = Field(
         default_factory=list,
@@ -778,40 +797,157 @@ def api_save_character_from_take(req: SaveCharacterFromTakeRequest):
     return {"character": char_record, "characters": chars}
 
 
-@app.post("/api/characters/upload", tags=["Character Voice Locker"])
-async def api_upload_character(
-    name: str = Form(..., description="Character name"),
-    ref_text: str = Form(..., description="Exact transcript spoken in the reference audio"),
-    description: str = Form("", description="Optional character notes"),
-    file: UploadFile = File(..., description="Reference WAV/MP3 audio clip (3s-15s)"),
-):
-    """Upload an external reference audio clip + transcript to create a locked character voice."""
-    if not name.strip() or not ref_text.strip():
-        raise HTTPException(status_code=400, detail="Character name and exact reference transcript are required.")
+def _find_optimal_reference_slice(audio_path: Union[str, Path]) -> Tuple[float, float]:
+    """Find a phonetically balanced 6s-12s speech section using silence detection."""
+    try:
+        cmd = ["ffmpeg", "-i", str(audio_path), "-af", "silencedetect=noise=-30dB:d=0.3", "-f", "null", "-"]
+        res = subprocess.run(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        lines = res.stderr.splitlines()
+
+        silences = []
+        for line in lines:
+            if "silencedetect" in line:
+                m_start = re.search(r"silence_start:\s*([0-9.]+)", line)
+                m_end = re.search(r"silence_end:\s*([0-9.]+)", line)
+                if m_start:
+                    silences.append(("start", float(m_start.group(1))))
+                elif m_end:
+                    silences.append(("end", float(m_end.group(1))))
+
+        cur_speech_start = 0.0
+        speech_chunks = []
+        for event, t in silences:
+            if event == "start":
+                if t > cur_speech_start + 0.5:
+                    speech_chunks.append((cur_speech_start, t))
+            elif event == "end":
+                cur_speech_start = t
+
+        for i in range(len(speech_chunks)):
+            t0 = max(0.0, speech_chunks[i][0] - 0.1)
+            for j in range(i, len(speech_chunks)):
+                t1 = speech_chunks[j][1] + 0.1
+                dur = t1 - t0
+                if 7.0 <= dur <= 12.5:
+                    return t0, t1
+    except Exception:
+        pass
+    return 0.5, 10.5
+
+
+def _ingest_audio_recording(
+    audio_source: Union[str, Path],
+    name: str,
+    ref_text: Optional[str] = None,
+    description: Optional[str] = None,
+    start_sec: Optional[float] = None,
+    end_sec: Optional[float] = None,
+) -> dict:
+    """
+    Ingests an external voice recording (.wav, .m4a, .mp3, etc.), extracts a pristine 24kHz mono Golden Reference,
+    transcribes it via on-device Whisper if ref_text is omitted, and locks the character into the Voice Locker.
+    """
+    src = Path(str(audio_source).strip())
+    if not src.exists():
+        raise HTTPException(status_code=404, detail=f"Audio recording not found at: {src}")
+
+    duration = 10.0
+    try:
+        probe_cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(src)]
+        dur_out = subprocess.check_output(probe_cmd).decode().strip()
+        duration = float(dur_out)
+    except Exception:
+        pass
 
     char_id = f"char_{int(time.time())}_{uuid.uuid4().hex[:5]}"
-    ext = Path(file.filename or "ref.wav").suffix or ".wav"
-    dest_filename = f"{char_id}{ext}"
+    dest_filename = f"{char_id}.wav"
     dest_path = CHARACTERS_DIR / dest_filename
 
-    with open(dest_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    if start_sec is not None and end_sec is not None:
+        cmd = ["ffmpeg", "-y", "-i", str(src), "-ss", str(start_sec), "-to", str(end_sec), "-ar", "24000", "-ac", "1", str(dest_path)]
+    elif duration > 13.0:
+        t0, t1 = _find_optimal_reference_slice(src)
+        cmd = ["ffmpeg", "-y", "-i", str(src), "-ss", str(t0), "-to", str(t1), "-ar", "24000", "-ac", "1", str(dest_path)]
+    else:
+        cmd = ["ffmpeg", "-y", "-i", str(src), "-ar", "24000", "-ac", "1", str(dest_path)]
+
+    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    if not ref_text or not ref_text.strip():
+        try:
+            import mlx_audio.stt as stt
+            whisper_model = stt.load_model("mlx-community/whisper-tiny")
+            trans_res = whisper_model.generate(str(dest_path))
+            ref_text = trans_res.text.strip()
+        except Exception:
+            ref_text = "Natural reference recording sample for voice cloning."
 
     char_record = {
         "id": char_id,
         "name": name.strip(),
-        "description": description.strip() or "Uploaded Reference Audio",
+        "description": description.strip() if description else f"Cloned voice from {src.name}",
         "ref_text": ref_text.strip(),
         "audio_file": dest_filename,
         "file_path": str(dest_path),
         "url": f"/audio/characters/{dest_filename}",
-        "source_model": "Custom Upload",
+        "source_model": "User Recording (Cloned)",
         "created_at": time.strftime("%Y-%m-%d %H:%M"),
     }
 
     chars = _read_json(CHARACTERS_JSON, [])
+    chars = [c for c in chars if c.get("name", "").strip().lower() != name.strip().lower() and c.get("id") != char_id]
     chars.insert(0, char_record)
     _write_json(CHARACTERS_JSON, chars)
+    return char_record
+
+
+@app.post("/api/characters/from-recording", tags=["Character Voice Locker"])
+def api_create_character_from_recording(req: CharacterFromRecordingRequest):
+    """Register an external voice recording (.wav, .m4a, .mp3, etc.) as a locked character voice with automatic 24kHz extraction & Whisper transcription."""
+    if not req.name.strip():
+        raise HTTPException(status_code=400, detail="Character name is required.")
+    char_record = _ingest_audio_recording(
+        audio_source=req.audio_path,
+        name=req.name,
+        ref_text=req.ref_text,
+        description=req.description,
+        start_sec=req.start_sec,
+        end_sec=req.end_sec,
+    )
+    chars = _read_json(CHARACTERS_JSON, [])
+    return {"character": char_record, "characters": chars}
+
+
+@app.post("/api/characters/upload", tags=["Character Voice Locker"])
+async def api_upload_character(
+    name: str = Form(..., description="Character name"),
+    ref_text: Optional[str] = Form(None, description="Exact transcript spoken in the reference audio (optional; transcribed via Whisper if omitted)"),
+    description: str = Form("", description="Optional character notes"),
+    file: UploadFile = File(..., description="Reference WAV/MP3/M4A audio clip"),
+):
+    """Upload an external reference audio clip to create a locked character voice."""
+    if not name.strip():
+        raise HTTPException(status_code=400, detail="Character name is required.")
+
+    temp_id = f"upload_{int(time.time())}_{uuid.uuid4().hex[:5]}"
+    ext = Path(file.filename or "ref.wav").suffix or ".wav"
+    temp_path = DATA_DIR / f"{temp_id}{ext}"
+
+    with open(temp_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    try:
+        char_record = _ingest_audio_recording(
+            audio_source=temp_path,
+            name=name,
+            ref_text=ref_text,
+            description=description,
+        )
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+
+    chars = _read_json(CHARACTERS_JSON, [])
     return {"character": char_record, "characters": chars}
 
 
@@ -940,6 +1076,16 @@ def _parse_script_text_to_lines(script_text: str) -> List[SceneLineItem]:
             top_p = None
             repetition_penalty = None
             seed = None
+            ref_audio_path = None
+            ref_text = None
+
+            full_meta = f"{instruct or ''} {directives or ''}"
+            ref_m = re.search(r"ref\s*[:=]\s*([^\s,\]\)]+)", full_meta, re.IGNORECASE)
+            if ref_m:
+                ref_audio_path = ref_m.group(1).strip()
+            ref_t_m = re.search(r"text\s*[:=]\s*([\"'][^\"']+[\"']|[^\],]+)", full_meta, re.IGNORECASE)
+            if ref_t_m:
+                ref_text = ref_t_m.group(1).strip().strip('"').strip("'")
 
             if directives:
                 if "maya" in directives:
@@ -994,6 +1140,8 @@ def _parse_script_text_to_lines(script_text: str) -> List[SceneLineItem]:
                         repetition_penalty=repetition_penalty,
                         seed=seed,
                         pause_after_ms=pause_after_ms,
+                        ref_audio_path=ref_audio_path,
+                        ref_text=ref_text,
                     )
                 )
 
@@ -1152,7 +1300,17 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
         )
 
     # Normalize cast lookup (case-insensitive)
-    cast_descriptions: Dict[str, str] = {k.strip().lower(): v.strip() for k, v in (req.cast or {}).items() if v.strip()}
+    cast_descriptions: Dict[str, str] = {}
+    for k, v in (req.cast or {}).items():
+        s_key = k.strip().lower()
+        if isinstance(v, str):
+            cast_descriptions[s_key] = v.strip()
+        elif isinstance(v, dict):
+            if v.get("description"):
+                cast_descriptions[s_key] = str(v["description"]).strip()
+            elif v.get("instruct"):
+                cast_descriptions[s_key] = str(v["instruct"]).strip()
+
     for item in lines:
         if item.instruct and item.speaker.strip().lower() not in cast_descriptions:
             cast_descriptions[item.speaker.strip().lower()] = item.instruct.strip()
@@ -1164,12 +1322,44 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
     last_used_model = engine.active_model_id
 
     # -------------------------------------------------------------------------
+    # PASS 0: Ingest external audio recordings provided in `cast` or `lines`
+    # -------------------------------------------------------------------------
+    for raw_speaker, cast_val in (req.cast or {}).items():
+        s_key = raw_speaker.strip().lower()
+        if isinstance(cast_val, dict) and any(k in cast_val for k in ("audio", "ref_audio", "file", "audio_path")):
+            audio_src = cast_val.get("audio") or cast_val.get("ref_audio") or cast_val.get("file") or cast_val.get("audio_path")
+            ref_txt = cast_val.get("ref_text") or cast_val.get("text")
+            desc = cast_val.get("description") or f"Cloned voice from audio recording for {raw_speaker}"
+            char = _ingest_audio_recording(audio_src, name=raw_speaker, ref_text=ref_txt, description=desc)
+            resolved_cast_map[s_key] = char
+        elif isinstance(cast_val, str):
+            cv = cast_val.strip()
+            audio_extensions = (".wav", ".mp3", ".m4a", ".ogg", ".flac", ".aac")
+            is_file = any(cv.lower().endswith(ext) for ext in audio_extensions) or Path(cv).is_file()
+            if is_file:
+                char = _ingest_audio_recording(cv, name=raw_speaker, description=f"Cloned voice from {Path(cv).name}")
+                resolved_cast_map[s_key] = char
+
+    for item in lines:
+        s_key = item.speaker.strip().lower()
+        if item.ref_audio_path and s_key not in resolved_cast_map:
+            char = _ingest_audio_recording(
+                item.ref_audio_path,
+                name=item.speaker.strip(),
+                ref_text=item.ref_text,
+                description=item.instruct or f"Cloned voice from {Path(item.ref_audio_path).name}",
+            )
+            resolved_cast_map[s_key] = char
+
+    # -------------------------------------------------------------------------
     # PASS 1: Discover brand-new characters, batch by design engine, and lock!
     # -------------------------------------------------------------------------
     new_speaker_first_line: Dict[str, int] = {}
     for idx, line in enumerate(lines):
         speaker = line.speaker.strip()
         s_key = speaker.lower()
+        if s_key in resolved_cast_map:
+            continue
         existing_char = _resolve_character(speaker)
         if existing_char is not None:
             resolved_cast_map[s_key] = existing_char

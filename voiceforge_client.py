@@ -140,6 +140,33 @@ class VoiceForgeClient:
             payload,
         )["character"]
 
+    def lock_character_from_recording(
+        self,
+        name: str,
+        audio_path: Union[str, Path],
+        ref_text: Optional[str] = None,
+        description: Optional[str] = None,
+        start_sec: Optional[float] = None,
+        end_sec: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """
+        Ingests an external voice recording (.wav, .m4a, .mp3, etc.), extracts a 24kHz Golden Reference,
+        auto-transcribes with on-device Whisper if `ref_text` is omitted, and locks the character into the locker.
+        """
+        payload: Dict[str, Any] = {
+            "name": name,
+            "audio_path": str(audio_path),
+        }
+        if ref_text is not None:
+            payload["ref_text"] = ref_text
+        if description is not None:
+            payload["description"] = description
+        if start_sec is not None:
+            payload["start_sec"] = start_sec
+        if end_sec is not None:
+            payload["end_sec"] = end_sec
+        return self._request_json("POST", "/api/characters/from-recording", payload)["character"]
+
     def speak_as_character(
         self,
         character_id_or_name: str,

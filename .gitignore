@@ -6,9 +6,16 @@ __pycache__/
 *$py.class
 
 # Generated audio takes & local runtime state (keep repo lightweight for GitHub)
+*.wav
+*.zip
+*.mp3
+*.m4a
 data/takes/*.wav
 data/characters/*.wav
 data/scenes/*.wav
+data/scenes/*.zip
+data/scenes/*.srt
+data/scenes/*_manifest.json
 data/takes.json
 data/characters.json
 data/scenes.json
