@@ -316,6 +316,10 @@ class SceneLineItem(BaseModel):
         None,
         description="Optional local path to an audio recording (.wav, .m4a, .mp3, etc.) to immediately clone and lock as this character.",
     )
+    continuity_group: Optional[str] = Field(
+        None,
+        description="Lines sharing a group chain context into each other even when they use different voices (e.g. one person's emotion clips 'Tamair (Angry)' and 'Tamair (Sad)'), so emotion shifts carry over gradually. Defaults to the speaker.",
+    )
     ref_text: Optional[str] = Field(
         None,
         description="Optional exact spoken transcript for `ref_audio_path`. If omitted, automatically transcribed via on-device Whisper.",
@@ -1203,7 +1207,29 @@ def _format_srt_timestamp(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
 
-def _mix_segments_into_master(segment_records: List[dict], sample_rate: int = 24000) -> np.ndarray:
+LINE_TARGET_DBFS = -20.0   # speech level every line is pulled towards
+LINE_LEVEL_KEEP = 0.15     # fraction of a line's own loudness difference kept, so whispers stay a bit quieter
+
+
+def _level_line(audio: np.ndarray, sample_rate: int) -> np.ndarray:
+    """Pull a line's speech loudness towards a common target so volume doesn't jump between takes."""
+    if audio.size == 0:
+        return audio
+    hop = max(1, int(sample_rate * 0.02))
+    n = audio.shape[0] // hop
+    if n < 5:
+        return audio
+    rms = np.sqrt(np.mean(audio[: n * hop].reshape(n, hop) ** 2, axis=1))
+    level_db = 20 * np.log10(float(np.percentile(rms, 90)) + 1e-9)
+    if level_db < -60:
+        return audio
+    gain_db = float(np.clip((LINE_TARGET_DBFS - level_db) * (1 - LINE_LEVEL_KEEP), -15.0, 15.0))
+    peak = float(np.max(np.abs(audio)))
+    max_gain_db = 20 * np.log10(0.95 / peak) if peak > 0 else gain_db
+    return (audio * 10 ** (min(gain_db, max_gain_db) / 20)).astype(np.float32)
+
+
+def _mix_segments_into_master(segment_records: List[dict], sample_rate: int = 24000, level_lines: bool = True) -> np.ndarray:
     """
     Mix and stitch ordered segment WAV files into a single master 24kHz timeline.
     Supports both positive turn-taking pauses (`pause_after_ms >= 0`) AND negative
@@ -1223,6 +1249,9 @@ def _mix_segments_into_master(segment_records: List[dict], sample_rate: int = 24
             audio, sr = sf.read(str(wav_path), dtype="float32")
             if audio.ndim > 1:
                 audio = audio.mean(axis=1)
+
+        if level_lines:
+            audio = _level_line(audio, sample_rate)
 
         start_sample = max(0, cursor_samples)
         end_sample = start_sample + audio.shape[0]
@@ -1310,6 +1339,10 @@ def _write_scene_package_files(scene_record: dict) -> None:
         ],
     }
     _write_json(manifest_path, manifest_payload)
+
+
+def _continuity_key(line: SceneLineItem) -> str:
+    return (line.continuity_group or line.speaker).strip().lower()
 
 
 def _execute_scene_render(req: SceneRenderRequest) -> dict:
@@ -1539,8 +1572,9 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
         prev_audio_path = None
         prev_text = None
         if req.context_continuity:
+            group = _continuity_key(line)
             for prev_idx in range(idx - 1, -1, -1):
-                if prev_idx in pre_rendered_takes and lines[prev_idx].speaker.strip().lower() == s_key:
+                if prev_idx in pre_rendered_takes and _continuity_key(lines[prev_idx]) == group:
                     prev_take_obj = pre_rendered_takes[prev_idx][0]
                     prev_audio_path = prev_take_obj.get("file_path") or str(TAKES_DIR / prev_take_obj["filename"])
                     prev_text = lines[prev_idx].text.strip()
@@ -1626,6 +1660,7 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
         segment_records.append({
             "index": idx + 1,
             "speaker": speaker,
+            "continuity_group": _continuity_key(line),
             "character_id": char_obj["id"] if char_obj else None,
             "model_id": take["model_id"],
             "action": action,
@@ -1747,7 +1782,7 @@ def api_reroll_scene_line(scene_id: str, req: RerollSceneLineRequest):
     # Find the character's preceding line in the scene so re-rolls preserve exact context continuity!
     prev_take_id = None
     for seg in reversed(segments):
-        if seg["index"] < req.line_index and seg["speaker"].strip().lower() == speaker.strip().lower():
+        if seg["index"] < req.line_index and (seg.get("continuity_group") or seg["speaker"]).strip().lower() == (target_seg.get("continuity_group") or speaker).strip().lower():
             prev_take_id = seg.get("take_id")
             break
 

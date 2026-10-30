@@ -893,7 +893,8 @@
           voiceId = l.variantId;
         }
         cast[speaker] = { character_id: voiceId };
-        lines.push({ speaker, text: l.text.trim() });
+        // One person's emotion clips chain into each other so emotion shifts carry over gradually
+        lines.push(c.profileId ? { speaker, text: l.text.trim(), continuity_group: c.name } : { speaker, text: l.text.trim() });
       });
       return {
         title: $('sceneTitle').value.trim() || 'Untitled Scene',
