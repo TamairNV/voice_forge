@@ -2125,14 +2125,22 @@ def _heuristic_extract(script: str) -> dict:
             match = _resolve_character(l.speaker)
             seen[key] = {
                 "name": l.speaker.strip(),
-                "description": l.instruct or "",
+                "description": l.instruct if _is_voice_description(l.instruct) else "",
                 "suggested_voice_id": match["id"] if match else "",
             }
     return {
         "title": "Untitled Scene",
         "characters": list(seen.values()),
-        "lines": [{"speaker": l.speaker.strip(), "text": l.text, "direction": ""} for l in lines],
+        # A short parenthetical like "(panting)" is an acting direction, not a voice description
+        "lines": [
+            {"speaker": l.speaker.strip(), "text": l.text, "direction": "" if _is_voice_description(l.instruct) else (l.instruct or "")}
+            for l in lines
+        ],
     }
+
+
+def _is_voice_description(instruct: Optional[str]) -> bool:
+    return bool(instruct) and len(instruct.split()) > 3
 
 
 class CastExtractRequest(BaseModel):
@@ -2293,6 +2301,65 @@ def api_cast_improve_description(req: CastImproveRequest):
         "sample_text": str(result.get("sample_text", "")).strip(),
         "notes": str(result.get("notes", "")).strip(),
     }
+
+
+_WHISPER_MODEL = None
+
+
+def _transcribe(path: Union[str, Path]) -> str:
+    global _WHISPER_MODEL
+    if _WHISPER_MODEL is None:
+        import mlx_audio.stt as stt
+        _WHISPER_MODEL = stt.load_model("mlx-community/whisper-tiny")
+    return _WHISPER_MODEL.generate(str(path)).text.strip()
+
+
+def _norm_words(text: str) -> List[str]:
+    text = re.sub(r"<[^>]+>", " ", text.lower())
+    return re.findall(r"[a-z0-9']+", text)
+
+
+@app.post("/api/scenes/{scene_id}/check", tags=["Casting Desk"])
+def api_check_scene(scene_id: str):
+    """
+    Quality check a rendered scene: transcribe every line with on-device Whisper and compare it with the script,
+    and flag lines whose length is implausible for their text (runaways, truncations, long silences).
+    Whisper-tiny is rough, so treat a low match as "listen to this one", not proof of a bad take.
+    """
+    import difflib
+
+    scene = next((s for s in _read_json(SCENES_JSON, []) if s["id"] == scene_id), None)
+    if not scene:
+        raise HTTPException(status_code=404, detail=f"Scene '{scene_id}' not found.")
+    results = []
+    for seg in scene.get("segments", []):
+        take_path = TAKES_DIR / Path(seg["take_url"]).name
+        heard = ""
+        try:
+            heard = _transcribe(take_path)
+        except Exception as e:
+            heard = f"(transcription failed: {e})"
+        want, got = _norm_words(seg["text"]), _norm_words(heard)
+        match = difflib.SequenceMatcher(None, want, got).ratio() if want else 1.0
+        n_chars = max(1, len(re.sub(r"<[^>]+>", "", seg["text"]).strip()))
+        ms_per_char = seg["duration_sec"] * 1000 / n_chars
+        issues = []
+        if match < 0.6:
+            issues.append("words don't match the script")
+        if ms_per_char > 160 and seg["duration_sec"] > 2.5:
+            issues.append("much longer than the text (runaway or long pauses)")
+        if ms_per_char < 35:
+            issues.append("much shorter than the text (words may be cut)")
+        results.append({
+            "index": seg["index"],
+            "speaker": seg["speaker"],
+            "text": seg["text"],
+            "heard": heard,
+            "match": round(match, 2),
+            "ms_per_char": round(ms_per_char),
+            "issues": issues,
+        })
+    return {"scene_id": scene_id, "lines": results, "flagged": [r["index"] for r in results if r["issues"]]}
 
 
 @app.patch("/api/characters/{char_id}", tags=["Character Voice Locker"])

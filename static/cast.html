@@ -125,6 +125,9 @@
     .newvoice textarea { min-height: 84px; font-size: 12px; }
     .improve-note { font-size: 11px; color: #c4b5fd; }
     .auditions { display: flex; flex-direction: column; gap: 4px; padding: 6px; border-radius: 8px; background: var(--bg-input); }
+    .qc { font-size: 10.5px; padding: 0 6px; }
+    .qc.ok { color: #6ee7b7; }
+    .qc.bad { color: #fcd34d; }
     .seg-text { background: transparent; border-color: transparent; padding: 4px 6px; color: var(--text-muted); }
     .seg-text:hover, .seg-text:focus { border-color: var(--border); color: var(--text-main); }
 
@@ -178,7 +181,10 @@
       <div class="panel sticky-col">
         <div class="panel-title">
           <span>1 · Script or sketch</span>
-          <button class="btn-sm" onclick="loadExample()">Example</button>
+          <span class="row tight">
+            <button class="btn-sm" onclick="newDraft()" title="Clear everything and start a new scene">New</button>
+            <button class="btn-sm" onclick="loadExample()">Example</button>
+          </span>
         </div>
         <textarea id="scriptInput" placeholder="Paste a sketch, a few lines (Name: line), or rough story notes…"></textarea>
         <div class="row" style="margin-top: 10px;">
@@ -359,7 +365,10 @@
       const btn = $('extractBtn');
       btn.disabled = true;
       const label = btn.innerHTML;
-      if (useClaude) btn.innerHTML = '<span class="spinner"></span> Reading the script…';
+      const started = Date.now();
+      const tick = useClaude ? setInterval(() => {
+        btn.innerHTML = `<span class="spinner"></span> Claude is reading the script… ${Math.round((Date.now() - started) / 1000)}s`;
+      }, 500) : null;
       $('extractWarn').style.display = 'none';
       try {
         await loadRoster();
@@ -390,15 +399,25 @@
       } catch (e) {
         toast('Extract failed: ' + e.message, 6000);
       } finally {
+        if (tick) clearInterval(tick);
         btn.disabled = false; btn.innerHTML = label;
       }
     }
 
     // ----------------------------------------------------------------- cast
-    function voiceOptions(selected, includeNew = true, emptyLabel = '— choose a voice —') {
+    function voiceOptions(selected, includeNew = true, emptyLabel = '— choose a voice —', nameHint = '') {
       const opts = [`<option value="">${emptyLabel}</option>`];
       if (includeNew) opts.push(`<option value="__new__" ${selected === '__new__' ? 'selected' : ''}>➕ New voice…</option>`);
-      state.roster.forEach(v => opts.push(`<option value="${v.id}" ${v.id === selected ? 'selected' : ''}>${escapeHtml(v.name)}</option>`));
+      const opt = v => `<option value="${v.id}" ${v.id === selected ? 'selected' : ''}>${escapeHtml(v.name)}</option>`;
+      const sorted = [...state.roster].sort((a, b) => a.name.localeCompare(b.name));
+      const hint = (nameHint || '').trim().toLowerCase().split(/\s+/)[0];
+      const matching = hint ? sorted.filter(v => v.name.toLowerCase().split(/[\s(]+/)[0] === hint) : [];
+      if (matching.length) {
+        opts.push(`<optgroup label="Named ${escapeHtml(nameHint.split(/\s+/)[0])}">${matching.map(opt).join('')}</optgroup>`);
+        opts.push(`<optgroup label="All voices">${sorted.filter(v => !matching.includes(v)).map(opt).join('')}</optgroup>`);
+      } else {
+        sorted.forEach(v => opts.push(opt(v)));
+      }
       return opts.join('');
     }
     function linesFor(key) { return state.lines.filter(l => l.speaker === key); }
@@ -418,10 +437,11 @@
             <input type="text" class="cast-name grow" value="${escapeHtml(c.name)}" title="Rename this character in the scene" onchange="renameCast(${i}, this.value)" />
             <span class="badge">${n} line${n === 1 ? '' : 's'}</span>
             <span class="badge ${v ? 'ok' : 'warn'}">${v ? 'cast' : 'needs voice'}</span>
+            <button class="btn-sm rose" title="Remove this character and their lines" onclick="removeCast(${i})">✕</button>
           </div>
           ${c.description ? `<div class="script-desc">From the script: ${escapeHtml(c.description)}</div>` : ''}
           <div class="row tight">
-            <select class="grow" onchange="pickVoice(${i}, this.value)">${voiceOptions(v ? c.voiceId : (showNew ? '__new__' : ''))}</select>
+            <select class="grow" onchange="pickVoice(${i}, this.value)">${voiceOptions(v ? c.voiceId : (showNew ? '__new__' : ''), true, undefined, c.name)}</select>
             ${v && c.previewUrl
               ? `<button class="btn-sm" onclick="play('${c.previewUrl}')" title="Play a freshly generated line in the cloned voice">▶ Preview</button>
                  <button class="btn-sm" onclick="play('${v.url}')" title="Play the original reference clip from your file">▶ Original</button>`
@@ -476,6 +496,14 @@
       } else {
         c.name = name;
       }
+      renderAll();
+    }
+    function removeCast(i) {
+      const c = state.cast[i];
+      const n = linesFor(c.key).length;
+      if (n && !confirm(`Remove ${c.name} and their ${n} line${n === 1 ? '' : 's'}?`)) return;
+      state.lines = state.lines.filter(l => l.speaker !== c.key);
+      state.cast.splice(i, 1);
       renderAll();
     }
     async function renameVoice(voiceId) {
@@ -663,13 +691,35 @@
             <input type="text" value="${escapeHtml(l.text)}" oninput="state.lines[${i}].text = this.value" />
             ${l.direction ? `<div class="direction">(${escapeHtml(l.direction)})</div>` : ''}
           </div>
-          <select class="line-variant" title="Use a different voice for just this line" onchange="state.lines[${i}].variantId = this.value">${voiceOptions(l.variantId, false, '↳ cast voice')}</select>
+          <select class="line-variant" title="Use a different voice for just this line" onchange="state.lines[${i}].variantId = this.value">${voiceOptions(l.variantId, false, '↳ cast voice', castByKey(l.speaker) ? castByKey(l.speaker).name : '')}</select>
           <span class="row tight">
+            <button class="btn-sm" title="Hear just this line in its voice" onclick="previewLine(${i}, this)">▶</button>
             <button class="btn-sm" title="Move up" onclick="moveLine(${i}, -1)">↑</button>
             <button class="btn-sm rose" title="Delete line" onclick="state.lines.splice(${i}, 1); renderAll()">✕</button>
           </span>
         </div>`).join('');
       updateRenderHint();
+    }
+    async function previewLine(i, btn) {
+      const l = state.lines[i];
+      const c = castByKey(l.speaker);
+      const voiceId = l.variantId || (c && c.voiceId);
+      if (!voiceId || !voiceById(voiceId)) { toast('Give this character a voice first.'); return; }
+      if (!l.text.trim()) return;
+      const key = voiceId + '|' + l.text.trim() + '|' + tempValue();
+      if (l.preview && l.preview.key === key) { play(l.preview.url); return; }
+      btn.innerHTML = '<span class="spinner"></span>'; btn.disabled = true;
+      setTts(true, 'Line ' + (i + 1));
+      try {
+        const d = await api('/api/synthesize', {
+          method: 'POST',
+          body: JSON.stringify({ model_id: 'qwen3_clone', character_id: voiceId, text: l.text.trim(), temperature: tempValue() }),
+        });
+        l.preview = { key, url: d.take.url };
+        play(d.take.url);
+      } catch (e) { toast('Preview failed: ' + e.message, 6000); }
+      btn.innerHTML = '▶'; btn.disabled = false;
+      setTts(false);
     }
     function moveLine(i, dir) {
       const j = i + dir;
@@ -750,14 +800,42 @@
         updateRenderHint();
       }
     }
-    function showResult(autoplay) {
+    function qcNote(index) {
+      const r = state.qc && state.qc.scene_id === state.scene.id ? state.qc.lines.find(x => x.index === index) : null;
+      if (!r) return '';
+      return r.issues.length
+        ? `<div class="qc bad" title="Whisper heard: ${escapeHtml(r.heard)}">⚠ ${escapeHtml(r.issues.join('; '))} · ${Math.round(r.match * 100)}% match · heard "${escapeHtml(r.heard.slice(0, 70))}"</div>`
+        : `<div class="qc ok" title="Whisper heard: ${escapeHtml(r.heard)}">✓ ${Math.round(r.match * 100)}% match</div>`;
+    }
+    async function checkScene(btn) {
+      const s = state.scene;
+      btn.innerHTML = '<span class="spinner"></span> Checking…'; btn.disabled = true;
+      try {
+        state.qc = await api(`/api/scenes/${s.id}/check`, { method: 'POST' });
+        showResult(false, false);
+        const n = state.qc.flagged.length;
+        toast(n ? `${n} line${n === 1 ? '' : 's'} worth a listen. Re-roll flagged to redo them.` : 'All lines match the script.', 5000);
+      } catch (e) { toast('Check failed: ' + e.message, 6000); showResult(false, false); }
+    }
+    async function rerollFlagged(btn) {
+      const flagged = state.qc ? [...state.qc.flagged] : [];
+      for (const idx of flagged) {
+        const b = [...document.querySelectorAll('.seg')][idx - 1]?.querySelector('.violet');
+        if (b) await rerollLine(idx, b, true);
+      }
+      state.qc = null;
+      showResult(false, false);
+      toast(`Re-rolled ${flagged.length} line${flagged.length === 1 ? '' : 's'}. Run Check lines again to confirm.`, 5000);
+    }
+    function showResult(autoplay, scroll = autoplay) {
       const s = state.scene;
       if (!s) return;
       $('resultPanel').style.display = 'block';
       $('resultLinks').innerHTML = `
         <a class="btn-sm" href="${s.url}" download>⬇ WAV</a>
         <a class="btn-sm" href="/api/scenes/${s.id}/subtitles.srt" download>SRT</a>
-        <a class="btn-sm" href="/api/scenes/${s.id}/export.zip">⬇ ZIP bundle</a>`;
+        <a class="btn-sm" href="/api/scenes/${s.id}/export.zip">⬇ ZIP bundle</a>
+        <button class="btn-sm emerald" id="checkBtn" onclick="checkScene(this)" title="Transcribe every line with Whisper and flag takes that don't match the script or are oddly long/short">🔍 Check lines</button>`;
       $('resultBody').innerHTML = `
         <div class="row"><strong>${escapeHtml(s.title)}</strong><span class="dim">${s.duration_sec}s · ${s.line_count} lines · rendered in ${s.elapsed_sec}s</span></div>
         <audio id="sceneAudio" controls src="${s.url}?t=${Date.now()}"></audio>
@@ -765,16 +843,22 @@
           <div class="seg">
             <span class="line-idx">${seg.index}</span>
             <span class="spk" title="${escapeHtml(seg.speaker)}">${escapeHtml(seg.speaker)}</span>
-            <input type="text" class="txt seg-text" id="segText${seg.index}" value="${escapeHtml(seg.text)}" title="Edit, then Re-roll to regenerate with the new words" />
+            <div style="min-width: 0;">
+              <input type="text" class="txt seg-text" id="segText${seg.index}" value="${escapeHtml(seg.text)}" title="Edit, then Re-roll to regenerate with the new words" />
+              ${qcNote(seg.index)}
+            </div>
             <span class="row tight">
               <button class="btn-sm" onclick="play('${seg.take_url}')" title="Play just this line">▶</button>
               <button class="btn-sm violet" onclick="rerollLine(${seg.index}, this)" title="Re-generate this line with a fresh take and re-stitch the scene">🎲 Re-roll</button>
             </span>
           </div>`).join('')}`;
+      if (state.qc && state.qc.scene_id === s.id && state.qc.flagged.length) {
+        $('resultLinks').insertAdjacentHTML('beforeend', `<button class="btn-sm violet" onclick="rerollFlagged(this)">🎲 Re-roll ${state.qc.flagged.length} flagged</button>`);
+      }
       if (autoplay) { const a = $('sceneAudio'); a.play().catch(() => {}); }
-      $('resultPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (scroll) $('resultPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-    async function rerollLine(index, btn) {
+    async function rerollLine(index, btn, quiet = false) {
       const s = state.scene;
       btn.innerHTML = '<span class="spinner"></span>'; btn.disabled = true;
       setTts(true, 'Re-rolling line ' + index);
@@ -786,10 +870,14 @@
         const t = tempValue(); if (t !== null) body.temperature = t;
         const d = await api(`/api/scenes/${s.id}/reroll-line`, { method: 'POST', body: JSON.stringify(body) });
         state.scene = d.scene || s;
+        if (state.qc) {  // this line's check result is stale now
+          state.qc.lines = state.qc.lines.filter(x => x.index !== index);
+          state.qc.flagged = state.qc.flagged.filter(x => x !== index);
+        }
         showResult(false);
         const seg = state.scene.segments.find(x => x.index === index);
-        if (seg) play(seg.take_url);
-        toast('Line ' + index + ' re-rolled and scene re-stitched.');
+        if (seg && !quiet) play(seg.take_url);
+        if (!quiet) toast('Line ' + index + ' re-rolled and scene re-stitched.');
       } catch (e) { toast('Re-roll failed: ' + e.message, 6000); renderResultButtons(); }
       setTts(false);
     }
@@ -873,11 +961,58 @@ MARK: ...Dav from upstairs?`;
       const s = (state.recentScenes || []).find(x => x.id === id);
       if (!s) return;
       state.scene = s;
-      showResult(false);
+      showResult(false, true);
     }
+
+    // Autosave the work in progress so a reload or closed tab doesn't lose it
+    const DRAFT_KEY = 'vf_cast_draft';
+    function saveDraft() {
+      try {
+        localStorage.setItem(DRAFT_KEY, JSON.stringify({
+          script: $('scriptInput').value,
+          title: $('sceneTitle').value,
+          cast: state.cast.map(c => ({ key: c.key, scriptName: c.scriptName, name: c.name, description: c.description, voiceId: c.voiceId,
+            newVoice: { open: c.newVoice.open, description: c.newVoice.description, sample: c.newVoice.sample } })),
+          lines: state.lines.map(l => ({ speaker: l.speaker, text: l.text, direction: l.direction, variantId: l.variantId })),
+          temperature: tempValue(),
+          pause: $('pauseMs').value,
+          continuity: $('continuity').checked,
+          sceneId: state.scene ? state.scene.id : null,
+        }));
+      } catch (e) { /* storage unavailable */ }
+    }
+    function restoreDraft() {
+      let d = null;
+      try { d = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); } catch (e) { return; }
+      if (!d || (!d.script && !(d.cast || []).length)) return;
+      $('scriptInput').value = d.script || '';
+      $('sceneTitle').value = d.title || ''; $('sceneTitle').dataset.auto = '0';
+      state.cast = (d.cast || []).map(c => ({ ...c, voiceId: voiceById(c.voiceId) ? c.voiceId : '',
+        newVoice: { ...newVoiceState(c.newVoice.open || !voiceById(c.voiceId), c.newVoice.description), sample: c.newVoice.sample || '' } }));
+      state.lines = (d.lines || []).map(l => ({ ...l, variantId: voiceById(l.variantId) ? l.variantId : '' }));
+      if (d.temperature !== null && d.temperature !== undefined) { $('tempAuto').checked = false; $('tempSlider').value = d.temperature; }
+      if (d.pause) $('pauseMs').value = d.pause;
+      if (d.continuity === false) $('continuity').checked = false;
+      syncTemp();
+      renderAll();
+      const sc = (state.recentScenes || []).find(x => x.id === d.sceneId);
+      if (sc) { state.scene = sc; showResult(false, false); }
+      if (state.cast.length) toast('Restored your last session.');
+    }
+    function newDraft() {
+      if (!confirm('Clear the script, cast and lines and start fresh? (Voices and scenes are kept.)')) return;
+      state.cast = []; state.lines = []; state.scene = null; state.qc = null;
+      $('scriptInput').value = ''; $('sceneTitle').value = ''; $('sceneTitle').dataset.auto = '1';
+      $('resultPanel').style.display = 'none';
+      renderAll(); saveDraft();
+    }
+
     syncTemp();
     renderAll();
-    Promise.all([loadStatus(), loadRoster(), loadSaved(), loadRecentScenes()]).catch(e => toast('Could not reach the server: ' + e.message));
+    Promise.all([loadStatus(), loadRoster(), loadSaved(), loadRecentScenes()])
+      .then(restoreDraft)
+      .catch(e => toast('Could not reach the server: ' + e.message))
+      .finally(() => setInterval(saveDraft, 2000));
   </script>
 </body>
 </html>
