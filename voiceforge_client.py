@@ -108,7 +108,7 @@ class VoiceForgeClient:
         self,
         name: str,
         instruct: str,
-        sample_text: str = "Keep your eyes sharp. Nothing in this sector is what it seems, and we only get one shot at this.",
+        sample_text: str = "Wait. Did you hear that? Keep your eyes sharp! Nothing in this sector is what it seems... and we only get one shot at this.",
         design_model_id: str = "qwen3_voicedesign",
         speed: float = 1.0,
         temperature: Optional[float] = None,
