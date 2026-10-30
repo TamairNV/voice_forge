@@ -376,18 +376,6 @@ TAG_TO_QWEN_INSTRUCT = {
 }
 
 
-# Words that already tell Qwen3 VoiceDesign how to emote, so no generic expressiveness cue is added
-QWEN_EMOTION_WORDS = (
-    "emotion", "expressive", "animated", "dramatic", "intonation", "inflection", "tone", "mood",
-    "angry", "furious", "sad", "tearful", "crying", "happy", "cheerful", "joyful", "excited", "nervous",
-    "anxious", "scared", "afraid", "panicked", "frantic", "calm", "soothing", "gentle", "sarcastic",
-    "playful", "flirty", "seductive", "menacing", "threatening", "weary", "tired", "bored", "deadpan",
-    "monotone", "flat", "whisper", "shouting", "yelling", "pleading", "desperate", "confident", "smug",
-    "warmly", "coldly", "bitter", "awkward", "embarrassed", "hesitant", "defeated", "baffled", "puzzled",
-    "uneasy", "concerned", "worried", "entitled", "irritated", "annoyed", "laughing", "giggly",
-)
-
-
 def sanitize_dialogue_for_model(text: str, model_id: str) -> Tuple[str, List[str]]:
     """
     Formats dialogue text "for the ear, not the eye" based on model family:
@@ -489,18 +477,15 @@ def compile_voice_instruct(
         if not has_intensity:
             additions.append("expressive tone at medium-high intensity")
     else:
-        # Qwen3-TTS 7-Dimension completion. No pitch filler: phrases like "well-anchored pitch" ask the
-        # model for a steady, monotone contour. When the description names no emotion or delivery style,
-        # ask for an emotionally engaged read, since VoiceDesign otherwise defaults to a neutral narrator.
-        has_emotion = tag_cues or any(w in lower for w in QWEN_EMOTION_WORDS)
+        # Qwen3-TTS 7-Dimension completion
+        if not has_pitch:
+            additions.append("well-anchored natural pitch")
         if not has_texture:
-            additions.append("articulate vocal timbre")
+            additions.append("articulate studio vocal timbre")
         if not has_pace:
             additions.append("natural conversational pacing")
-        if not has_emotion:
-            additions.append("emotionally engaged, expressive delivery with lively, varied intonation")
         if "studio" not in lower and "dialogue" not in lower and "mic" not in lower:
-            additions.append("clean close-mic recording")
+            additions.append("close-mic studio game dialogue presence")
 
     if additions:
         return f"{base}, {', '.join(additions)}."
@@ -548,8 +533,8 @@ def optimize_character_prompts(
 
     # 10-second phonetically rich Golden Reference sentence (ideal for Qwen3-TTS Base ICL Voice Cloning)
     golden_sample_qwen = (
-        f"Listen closely, friend. Everyone in this place has a secret they are trying to hide! "
-        f"And if we want to make it out before sunrise... well, you had better stick right beside me, okay?"
+        f"Listen closely, friend. Everyone in this place has a secret they are trying to hide, "
+        f"and if we want to make it out before sunrise, you had better stick right beside me."
     )
     golden_sample_maya = (
         f"Listen closely, friend. <sigh> Everyone in this place has a secret they are trying to hide, "

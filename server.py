@@ -213,7 +213,7 @@ class DesignAndLockRequest(BaseModel):
     name: str = Field(..., description="Name of the new game character (e.g., 'Captain Vane').")
     instruct: str = Field(..., description="Detailed voice description (age, gender, accent, timbre, pitch, pacing).")
     sample_text: str = Field(
-        "Wait. Did you hear that? Keep your eyes sharp! Nothing in this sector is what it seems... and we only get one shot at this.",
+        "Keep your eyes sharp. Nothing in this sector is what it seems, and we only get one shot at this.",
         description="Reference sentence the character will speak to establish their vocal timbre (5-12 seconds recommended).",
     )
     design_model_id: str = Field(
@@ -1427,10 +1427,8 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
             if anchor_engine != last_used_model:
                 model_swaps += 1
                 last_used_model = anchor_engine
-            # Varied punctuation (question, exclamation, trailing pause) gives the anchor real intonation
-            # movement; clone mode copies the anchor's prosody, so a flat anchor makes every line flat.
             anchor_text = (
-                "Wait. Did you hear that? Keep your eyes sharp, friend! Nothing in this place is what it seems... "
+                "Keep your eyes sharp, friend. Nothing in this place is what it seems, "
                 "and if we want to make it out before sunrise, you had better stick right beside me."
             )
             anchor_take = _run_synthesis_and_save(
