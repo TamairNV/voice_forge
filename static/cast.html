@@ -446,6 +446,7 @@
               <button class="btn-sm violet" onclick="improveVoice(${i}, this)" ${nv.busy ? 'disabled' : ''} title="Optional: a strong Claude model rewrites the description for more emotion and writes a lively reference line">✨ Improve for emotion</button>
               <button class="btn-sm emerald" onclick="createVoice(${i}, this)" ${nv.busy ? 'disabled' : ''} title="Design one take and lock it straight away">🎙 Create voice</button>
               <button class="btn-sm" onclick="auditionVoice(${i}, this)" ${nv.busy ? 'disabled' : ''} title="Design 3 different takes from this description, then keep the one you like">🎧 Audition 3</button>
+              <label class="btn-sm" title="Clone this character from your own recording (wav, mp3, m4a…). Long files are trimmed to the best 6-12s automatically." ${nv.busy ? 'style="opacity:0.45; pointer-events:none;"' : ''}>📁 Clone from file<input type="file" accept="audio/*,.wav,.mp3,.m4a,.flac,.ogg,.aac" style="display:none" onchange="cloneFromFile(${i}, this)" /></label>
               ${v ? `<button class="btn-sm" onclick="state.cast[${i}].newVoice.open = false; renderCast()">Cancel</button>` : ''}
             </div>
           </div>` : `<div><button class="btn-sm" onclick="state.cast[${i}].newVoice.open = true; renderCast()">➕ Make a new voice instead</button></div>`}
@@ -560,6 +561,33 @@
         toast('3 takes ready. Play them and keep your favourite.');
       } catch (e) { toast('Audition failed: ' + e.message, 6000); }
       nv.busy = false; setTts(false); renderCast();
+    }
+    async function cloneFromFile(i, input) {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      const c = state.cast[i];
+      const nv = c.newVoice;
+      const transcript = prompt(`Cloning ${c.name} from "${file.name}".\n\nOptional: type exactly what is said in the clip (more accurate than auto-transcribe). Leave blank to auto-transcribe.`, '');
+      if (transcript === null) { input.value = ''; return; }
+      const form = new FormData();
+      form.append('name', c.name);
+      form.append('description', (nv.description || '').trim() || `Cloned from ${file.name}`);
+      if (transcript.trim()) form.append('ref_text', transcript.trim());
+      form.append('file', file);
+      nv.busy = true; renderCast();
+      setTts(true, 'Cloning ' + c.name);
+      try {
+        const res = await fetch('/api/characters/upload', { method: 'POST', body: form });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.detail || res.statusText);
+        state.roster = d.characters;
+        c.voiceId = d.character.id;
+        nv.open = false; nv.notes = ''; nv.prev = null; nv.auditions = [];
+        rememberVoice(c.scriptName, c.voiceId);
+        play(d.character.url);
+        toast(`Cloned "${d.character.name}" from ${file.name}. Heard: "${(d.character.ref_text || '').slice(0, 80)}"`, 6000);
+      } catch (e) { toast('Clone failed: ' + e.message, 6000); }
+      nv.busy = false; setTts(false); renderAll();
     }
     async function lockAudition(i, k, btn) {
       const c = state.cast[i];
