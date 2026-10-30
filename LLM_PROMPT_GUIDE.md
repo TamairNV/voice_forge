@@ -56,7 +56,7 @@ Qwen3-TTS Base uses In-Context Learning (ICL) over the reference audio (`ref_aud
 - **100% Pure Unprocessed Reference**: Golden Reference audio is always saved at `speed=1.0, trim_silence=False` so the 12.5Hz RVQ speech tokenizer aligns `ref_codes` and `ref_text` with zero time-stretch artifacts.
 - **Automatic RVQ Timbre Lock**: VoiceForge automatically locks Qwen3-TTS's 15 Residual Vector Quantization acoustic timbre codebooks (`code_1..code_15`) to low-entropy sampling (`temp <= 0.30, top_p <= 0.75, top_k <= 20`) while allowing `code_0` (prosody/delivery) to express emotion.
 - **Native Sampling Parameters (Exposed Per-Line & Per-Call)**:
-  - `temperature`: `0.50` default for `qwen3_clone` (`0.35–0.50` = ultra-consistent; `0.65–0.85` = more dramatic inflection).
+  - `temperature`: `0.58` default for `qwen3_clone` (`0.35–0.50` = ultra-consistent; `0.65–0.85` = more dramatic inflection). Emotional lines get an automatic boost of up to +0.15 (capped at 0.75 for clone, 1.0 for design); pass `dynamic_temperature: false` to disable.
   - `top_p`: `0.82` default for `qwen3_clone`.
   - `repetition_penalty`: `1.5` default for `qwen3_clone` (now honoured as given; values down to ~1.2 are fine with short references), `1.05` for Qwen3 VoiceDesign, `1.15` for Maya-1.
   - `seed`: Optional deterministic integer seed (automatically anchored per-character if omitted).

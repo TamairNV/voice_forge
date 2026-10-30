@@ -877,8 +877,32 @@ def _build_rolling_context_reference(
 
 # Sampling defaults. 1.5 matches the repetition penalty mlx-audio used to force on ICL, which keeps
 # long chained references from looping. (Warmer clone settings, 0.75 / 0.92, were A/B tested and lost.)
-QWEN_DESIGN_DEFAULTS = {"temperature": 0.80, "top_p": 0.95, "repetition_penalty": 1.05}
-QWEN_CLONE_DEFAULTS = {"temperature": 0.50, "top_p": 0.82, "repetition_penalty": 1.5}
+QWEN_DESIGN_DEFAULTS = {"temperature": 0.85, "top_p": 0.95, "repetition_penalty": 1.05}
+QWEN_CLONE_DEFAULTS = {"temperature": 0.58, "top_p": 0.82, "repetition_penalty": 1.5}
+
+# Dynamic temperature: emotional lines get up to +0.15 on code_0 (prosody) so they can move further
+# from the reference's contour; calm lines stay at the base value. Timbre codebooks stay clamped.
+MAX_EMOTION_TEMP_BOOST = 0.15
+EMOTION_TEMP_CEILING = {"voice_design": 1.0, "voice_clone": 0.75}
+_EMOTION_WORDS_RE = re.compile(
+    r"\b(no+|please|help|stop|sorry|hate|love|god|damn|scream\w*|run|why|never|kill|dead|die|"
+    r"unbelievable|serious|seriously|dare|wow|oh|ha|haha)\b",
+    re.IGNORECASE,
+)
+
+
+def _emotion_temperature_boost(raw_text: str, extracted_tags: Optional[List[str]] = None) -> float:
+    """Scores how emotionally charged a line reads (exclamations, ellipses, shouted words, tags, charged words)."""
+    text = raw_text or ""
+    boost = 0.0
+    boost += min(text.count("!"), 2) * 0.04
+    boost += min(text.count("...") + text.count("…"), 2) * 0.025
+    boost += 0.03 if re.search(r"[?!]{2,}|\?!|!\?", text) else 0.0
+    shouted = [w for w in re.findall(r"\b[A-Z]{2,}\b", text) if w not in ("I", "OK", "TV")]
+    boost += min(len(shouted), 2) * 0.03
+    boost += min(len(set(extracted_tags or [])), 2) * 0.04
+    boost += min(len(_EMOTION_WORDS_RE.findall(text)), 2) * 0.02
+    return round(min(boost, MAX_EMOTION_TEMP_BOOST), 3)
 
 
 def _split_for_synthesis(text: str, max_chars: int = 220) -> List[str]:
@@ -996,6 +1020,7 @@ class VoiceForgeEngine:
         ref_text: Optional[str] = None,
         prev_audio_path: Optional[str] = None,
         prev_text: Optional[str] = None,
+        dynamic_temperature: bool = True,
     ) -> Tuple[np.ndarray, int, Dict[str, Any]]:
         # Ensure requested model is active
         if self.active_model_id != model_id or self.active_model is None:
@@ -1081,6 +1106,8 @@ class VoiceForgeEngine:
 
             if info["mode"] == "voice_design":
                 temp = temperature if temperature is not None else QWEN_DESIGN_DEFAULTS["temperature"]
+                temp_boost = _emotion_temperature_boost(text, extracted_tags) if dynamic_temperature else 0.0
+                temp = min(max(temp, temp + temp_boost), EMOTION_TEMP_CEILING["voice_design"]) if temp_boost else temp
                 tp = top_p if top_p is not None else QWEN_DESIGN_DEFAULTS["top_p"]
                 rp = repetition_penalty if repetition_penalty is not None else QWEN_DESIGN_DEFAULTS["repetition_penalty"]
                 self.active_model._lock_rvq_timbre = False
@@ -1102,6 +1129,8 @@ class VoiceForgeEngine:
                 )
             elif info["mode"] == "voice_clone":
                 temp = temperature if temperature is not None else QWEN_CLONE_DEFAULTS["temperature"]
+                temp_boost = _emotion_temperature_boost(text, extracted_tags) if dynamic_temperature else 0.0
+                temp = min(max(temp, temp + temp_boost), EMOTION_TEMP_CEILING["voice_clone"]) if temp_boost else temp
                 tp = top_p if top_p is not None else QWEN_CLONE_DEFAULTS["top_p"]
                 rp = repetition_penalty if repetition_penalty is not None else QWEN_CLONE_DEFAULTS["repetition_penalty"]
                 self.active_model._lock_rvq_timbre = True
@@ -1175,6 +1204,7 @@ class VoiceForgeEngine:
                 "tokens": total_tokens,
                 "speed": round(speed, 2),
                 "temperature": round(temp, 2),
+                "temperature_boost": temp_boost,
                 "top_p": round(tp, 2),
                 "seed": base_seed,
                 "chunks": len(results),

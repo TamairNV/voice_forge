@@ -176,7 +176,7 @@ class SynthesizeRequest(BaseModel):
     )
     temperature: Optional[float] = Field(
         None,
-        description="Native model sampling temperature (defaults to 0.50 for Qwen3 Clone, 0.80 for Qwen3 Design, 0.42 for Maya-1).",
+        description="Native model sampling temperature (defaults to 0.58 for Qwen3 Clone, 0.85 for Qwen3 Design, plus a dynamic boost on emotional lines; 0.42 for Maya-1).",
     )
     top_p: Optional[float] = Field(
         None,
@@ -189,6 +189,10 @@ class SynthesizeRequest(BaseModel):
     seed: Optional[int] = Field(
         None,
         description="Optional deterministic MLX random seed. In `qwen3_clone`, automatically defaults to a stable per-character seed if omitted.",
+    )
+    dynamic_temperature: bool = Field(
+        True,
+        description="Qwen3 only: raise temperature by up to +0.15 on emotionally charged lines (exclamations, ellipses, shouting, emotion tags). The effective value is reported in metrics.",
     )
     character_id: Optional[str] = Field(
         None,
@@ -606,6 +610,7 @@ def _run_synthesis_and_save(req: SynthesizeRequest) -> dict:
             ref_text=ref_text,
             prev_audio_path=prev_audio_path,
             prev_text=prev_text,
+            dynamic_temperature=req.dynamic_temperature,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
