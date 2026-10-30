@@ -26,3 +26,4 @@ data/scenes.json
 .idea/
 *.log
 data/casts.json
+data/profiles.json

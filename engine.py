@@ -876,15 +876,16 @@ def _build_rolling_context_reference(
 
 
 # Sampling defaults. 1.5 matches the repetition penalty mlx-audio used to force on ICL, which keeps
-# long chained references from looping. (Warmer clone settings, 0.75 / 0.92, were A/B tested and lost.)
+# long chained references from looping. Clone temperature is 0.95: Tamair prefers a natural, emotional
+# read over an exact copy of the reference (an earlier 0.58 default sounded too flat in practice).
 QWEN_DESIGN_DEFAULTS = {"temperature": 0.85, "top_p": 0.95, "repetition_penalty": 1.05}
-QWEN_CLONE_DEFAULTS = {"temperature": 0.58, "top_p": 0.82, "repetition_penalty": 1.5}
+QWEN_CLONE_DEFAULTS = {"temperature": 0.95, "top_p": 0.82, "repetition_penalty": 1.5}
 
 # Dynamic temperature: emotional lines get up to +0.15 on code_0 (prosody) so they can move further
 # from the reference's contour; calm lines stay at the base value. Timbre codebooks stay clamped.
 MAX_EMOTION_TEMP_BOOST = 0.15
 # The ceiling only caps the boost; an explicitly higher temperature is never lowered.
-EMOTION_TEMP_CEILING = {"voice_design": 1.05, "voice_clone": 0.85}
+EMOTION_TEMP_CEILING = {"voice_design": 1.05, "voice_clone": 1.05}
 _EMOTION_WORDS_RE = re.compile(
     r"\b(no+|please|help|stop|sorry|hate|love|god|damn|scream\w*|run|why|never|kill|dead|die|"
     r"unbelievable|serious|seriously|dare|wow|oh|ha|haha)\b",

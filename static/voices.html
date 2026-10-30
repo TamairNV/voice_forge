@@ -129,6 +129,7 @@
       </div>
     </div>
     <div class="row">
+      <a class="btn-sm" href="/clone">🎙 Clone Studio</a>
       <a class="btn-sm" href="/cast">🎭 Casting Desk</a>
       <a class="btn-sm" href="/">← Studio</a>
     </div>
@@ -176,7 +177,7 @@
   <div class="toast" id="toast"></div>
 
   <script>
-    const TRY_TEMP = 0.68;  // same warmer default as the Casting Desk's Auto
+    const TRY_TEMP = 0.95;  // same as the clone default
     const state = { voices: [], filter: 'all', selected: new Set(), open: new Set(), tryText: {} };
     let player = null, playerUrl = null;
 

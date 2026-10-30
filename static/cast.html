@@ -123,6 +123,9 @@
     .script-desc { font-size: 11.5px; color: var(--text-muted); font-style: italic; }
     .newvoice { border-top: 1px dashed var(--border-light); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
     .newvoice textarea { min-height: 84px; font-size: 12px; }
+    .profile-strip { display: flex; gap: 4px; align-items: center; font-size: 15px; padding: 4px 6px; border-radius: 8px; background: var(--bg-input); }
+    .profile-strip span { cursor: pointer; }
+    .emo-chip { font-size: 10.5px; color: #c4b5fd; }
     .improve-note { font-size: 11px; color: #c4b5fd; }
     .auditions { display: flex; flex-direction: column; gap: 4px; padding: 6px; border-radius: 8px; background: var(--bg-input); }
     .qc { font-size: 10.5px; padding: 0 6px; }
@@ -182,6 +185,7 @@
     <div class="header-right">
       <span class="pill" id="claudePill" title="Claude is used to break down scripts and improve voice descriptions"><span class="dot" id="claudeDot"></span><span id="claudeText">Checking Claude…</span></span>
       <span class="pill"><span class="dot" id="ttsDot"></span><span id="ttsText">TTS</span></span>
+      <a class="btn-sm" href="/clone">🎙 Clone Studio</a>
       <a class="btn-sm" href="/voices">🗂 Voices</a>
       <a class="btn-sm" href="/">← Studio</a>
     </div>
@@ -240,8 +244,8 @@
               <span class="muted" style="font-size: 11px; font-weight: 600;">Temperature <span class="temp-val" id="tempVal">auto</span></span>
               <label class="check"><input type="checkbox" id="tempAuto" checked onchange="syncTemp()" /> Auto</label>
             </div>
-            <input type="range" id="tempSlider" min="0.3" max="1.2" step="0.01" value="0.68" oninput="syncTemp()" disabled />
-            <div class="dim">Auto: 0.68 for lines, 0.92 for new voices, plus a boost on emotional lines. Untick to set your own. Higher is wilder.</div>
+            <input type="range" id="tempSlider" min="0.3" max="1.2" step="0.01" value="0.95" oninput="syncTemp()" disabled />
+            <div class="dim">Auto: 0.95 for lines, 0.92 for new voices, plus a boost on emotional lines. Untick to set your own. Higher is wilder.</div>
           </div>
           <div>
             <label class="field" style="margin-top: 0;">Gap between lines (ms)</label>
@@ -374,8 +378,8 @@
     });
     function voiceById(id) { return state.roster.find(c => c.id === id); }
     function castByKey(key) { return state.cast.find(c => c.key === key); }
-    // Auto on this page runs a little warmer than the studio defaults (clone 0.58 / design 0.85); the emotion boost still applies on top.
-    const AUTO_TEMP = { clone: 0.68, design: 0.92 };
+    // Auto: clone lines at 0.95 (natural and emotional rather than an exact copy), new voices a little warmer than the studio's 0.85.
+    const AUTO_TEMP = { clone: 0.95, design: 0.92 };
     function rawTemp() { return $('tempAuto').checked ? null : parseFloat($('tempSlider').value); }
     function tempValue(kind = 'clone') { const t = rawTemp(); return t === null ? AUTO_TEMP[kind] : t; }
     function syncTemp() {
@@ -415,9 +419,45 @@
       } catch (e) { $('ttsDot').className = 'dot bad'; }
     }
     async function loadRoster() {
-      const d = await api('/api/characters');
+      const [d, pr, em] = await Promise.all([
+        api('/api/characters'), api('/api/profiles').catch(() => ({ profiles: [] })),
+        state.emotions ? Promise.resolve(null) : api('/api/profiles/emotions').catch(() => null),
+      ]);
       state.roster = d.characters || [];
+      state.profiles = (pr.profiles || []).filter(p => p.clips.length);
+      if (em) { state.emotions = em.emotions; state.emotionKeywords = em.keywords; }
     }
+
+    // ------------------------------------------------------------- profiles
+    // A cast member can be a Clone Studio profile: each line then uses the clip for its emotion.
+    function profileById(id) { return (state.profiles || []).find(p => p.id === id); }
+    function emotionMeta(id) { return (state.emotions || []).find(e => e.id === id); }
+    function emotionOfLine(l) {
+      if (l.emotion) return l.emotion;
+      const d = (l.direction || '').toLowerCase();
+      for (const [emo, words] of Object.entries(state.emotionKeywords || {})) if (words.some(w => d.includes(w))) return emo;
+      const letters = l.text.replace(/[^A-Za-z]/g, '');
+      if (letters.length > 6 && letters.replace(/[^A-Z]/g, '').length / letters.length > 0.7) return 'shouting';
+      return 'neutral';
+    }
+    function pickProfileClip(p, emotion) {
+      const byEmo = Object.fromEntries(p.clips.map(c => [c.emotion, c]));
+      const meta = emotionMeta(emotion);
+      for (const e of [emotion, ...(meta ? meta.fallback : []), 'neutral']) if (byEmo[e]) return byEmo[e];
+      return p.clips[0];
+    }
+    function applyProfile(c) {
+      const p = profileById(c.profileId);
+      if (!p) return;
+      c.voiceId = pickProfileClip(p, 'neutral').character_id;
+      linesFor(c.key).forEach(l => {
+        if (l.variantManual) return;
+        const clip = pickProfileClip(p, emotionOfLine(l));
+        l.profileEmotion = clip.emotion;
+        l.variantId = clip.character_id === c.voiceId ? '' : clip.character_id;
+      });
+    }
+    function applyAllProfiles() { state.cast.forEach(c => { if (c.profileId) applyProfile(c); }); }
     async function loadSaved() {
       const d = await api('/api/casts');
       state.saved = d.casts || [];
@@ -447,13 +487,15 @@
           $('sceneTitle').value = d.title || ''; $('sceneTitle').dataset.auto = '1';
         }
         state.cast = d.characters.map(c => {
-          const voiceId = rememberedVoice(c.name) && voiceById(rememberedVoice(c.name)) ? rememberedVoice(c.name) : (c.suggested_voice_id || '');
+          const rem = rememberedVoice(c.name);
+          const profileId = rem.startsWith('profile:') && profileById(rem.slice(8)) ? rem.slice(8) : '';
+          const voiceId = profileId ? '' : (rem && voiceById(rem) ? rem : (c.suggested_voice_id || ''));
           return {
-            key: c.name, scriptName: c.name, name: c.name, description: c.description || '', voiceId,
-            newVoice: newVoiceState(!voiceId, c.description),
+            key: c.name, scriptName: c.name, name: c.name, description: c.description || '', voiceId, profileId,
+            newVoice: newVoiceState(!voiceId && !profileId, c.description),
           };
         });
-        state.lines = d.lines.map(l => ({ speaker: l.speaker, text: l.text, direction: l.direction || '', variantId: l.variant_voice_id || '' }));
+        state.lines = d.lines.map(l => ({ speaker: l.speaker, text: l.text, direction: l.direction || '', emotion: l.emotion || '', variantId: l.variant_voice_id || '' }));
         // Map speakers to cast keys case-insensitively; drop variants that just repeat the cast voice
         let variants = 0;
         state.lines.forEach(l => {
@@ -462,6 +504,7 @@
           if (l.variantId && (!voiceById(l.variantId) || (c && l.variantId === c.voiceId))) l.variantId = '';
           if (l.variantId) variants++;
         });
+        applyAllProfiles();
         if (variants) setTimeout(() => toast(`Matched ${variants} line${variants === 1 ? '' : 's'} to emotion variants. Check the Lines list.`, 4500), 3300);
         renderAll();
         toast(`Found ${state.cast.length} characters and ${state.lines.length} lines` + (d.via === 'parser' ? ' (built-in parser)' : ''));
@@ -477,6 +520,10 @@
     function voiceOptions(selected, includeNew = true, emptyLabel = '— choose a voice —', nameHint = '') {
       const opts = [`<option value="">${emptyLabel}</option>`];
       if (includeNew) opts.push(`<option value="__new__" ${selected === '__new__' ? 'selected' : ''}>➕ New voice…</option>`);
+      if (includeNew && (state.profiles || []).length) {
+        opts.push(`<optgroup label="👤 Emotion profiles (picks a clip per line)">${state.profiles.map(p =>
+          `<option value="profile:${p.id}" ${selected === 'profile:' + p.id ? 'selected' : ''}>👤 ${escapeHtml(p.name)} · ${p.clips.length} emotion${p.clips.length === 1 ? '' : 's'}</option>`).join('')}</optgroup>`);
+      }
       const opt = v => `<option value="${v.id}" ${v.id === selected ? 'selected' : ''}>${escapeHtml(v.name)}</option>`;
       const sorted = [...state.roster].sort((a, b) => a.name.localeCompare(b.name));
       const hint = (nameHint || '').trim().toLowerCase().split(/\s+/)[0];
@@ -509,8 +556,9 @@
             <button class="btn-sm rose" title="Remove this character and their lines" onclick="removeCast(${i})">✕</button>
           </div>
           ${c.description ? `<div class="script-desc">From the script: ${escapeHtml(c.description)}</div>` : ''}
+          ${c.profileId && profileById(c.profileId) ? `<div class="profile-strip" title="Each line uses the closest recorded emotion">👤 ${profileById(c.profileId).clips.map(cl => { const m = emotionMeta(cl.emotion); return `<span title="${m ? m.label : cl.emotion}" onclick="play('${cl.url}')">${m ? m.icon : '•'}</span>`; }).join('')} <a class="dim" href="/clone" style="margin-left: auto;">edit in Clone Studio</a></div>` : ''}
           <div class="row tight">
-            <select class="grow" onchange="pickVoice(${i}, this.value)">${voiceOptions(v ? c.voiceId : (showNew ? '__new__' : ''), true, undefined, c.name)}</select>
+            <select class="grow" onchange="pickVoice(${i}, this.value)">${voiceOptions(c.profileId && profileById(c.profileId) ? 'profile:' + c.profileId : (v ? c.voiceId : (showNew ? '__new__' : '')), true, undefined, c.name)}</select>
             ${v && c.previewUrl
               ? `<button class="btn-sm" onclick="play('${c.previewUrl}')" title="Play a freshly generated line in the cloned voice">▶ Preview</button>
                  <button class="btn-sm" onclick="play('${v.url}')" title="Play the original reference clip from your file">▶ Original</button>`
@@ -549,7 +597,16 @@
 
     function pickVoice(i, value) {
       const c = state.cast[i];
+      linesFor(c.key).forEach(l => { if (!l.variantManual) { l.variantId = ''; l.profileEmotion = ''; } });
+      c.profileId = '';
       if (value === '__new__') { c.newVoice.open = true; c.voiceId = ''; }
+      else if (value.startsWith('profile:')) {
+        c.profileId = value.slice(8); c.previewUrl = ''; c.newVoice.open = false;
+        applyProfile(c);
+        rememberVoice(c.scriptName, value);
+        const n = linesFor(c.key).filter(l => l.variantId).length;
+        toast(`${c.name} now uses the ${profileById(c.profileId).name} profile: ${n} line${n === 1 ? '' : 's'} on an emotion clip.`, 4500);
+      }
       else { c.voiceId = value; c.previewUrl = ''; c.newVoice.open = !value; if (value) rememberVoice(c.scriptName, value); }
       renderAll();
     }
@@ -755,12 +812,12 @@
       list.innerHTML = state.lines.map((l, i) => `
         <div class="line-row">
           <span class="line-idx">${i + 1}</span>
-          <select onchange="state.lines[${i}].speaker = this.value; renderCast(); updateRenderHint()">${speakerOpts(l.speaker)}</select>
+          <select onchange="const l = state.lines[${i}]; l.speaker = this.value; if (!l.variantManual) { l.variantId = ''; l.profileEmotion = ''; } applyAllProfiles(); renderAll()">${speakerOpts(l.speaker)}</select>
           <div class="line-text">
             <input type="text" value="${escapeHtml(l.text)}" oninput="state.lines[${i}].text = this.value" />
-            ${l.direction ? `<div class="direction">(${escapeHtml(l.direction)})</div>` : ''}
+            ${l.direction || l.profileEmotion ? `<div class="direction">${l.direction ? '(' + escapeHtml(l.direction) + ')' : ''}${l.profileEmotion && emotionMeta(l.profileEmotion) ? ` <span class="emo-chip">→ ${emotionMeta(l.profileEmotion).icon} ${emotionMeta(l.profileEmotion).label} clip</span>` : ''}</div>` : ''}
           </div>
-          <select class="line-variant" title="Use a different voice for just this line" onchange="state.lines[${i}].variantId = this.value">${voiceOptions(l.variantId, false, '↳ cast voice', castByKey(l.speaker) ? castByKey(l.speaker).name : '')}</select>
+          <select class="line-variant" title="Use a different voice for just this line" onchange="state.lines[${i}].variantId = this.value; state.lines[${i}].variantManual = true; state.lines[${i}].profileEmotion = ''">${voiceOptions(l.variantId, false, '↳ cast voice', castByKey(l.speaker) ? castByKey(l.speaker).name : '')}</select>
           <span class="row tight">
             <button class="btn-sm" title="Hear just this line in its voice" onclick="previewLine(${i}, this)">▶</button>
             <button class="btn-sm" title="Move up" onclick="moveLine(${i}, -1)">↑</button>
@@ -829,7 +886,9 @@
           const v = voiceById(l.variantId);
           // "Phoebe Panicked" on Phoebe's line reads as "Phoebe (Panicked)"
           let label = v ? v.name : 'variant';
-          if (label.toLowerCase().startsWith(c.name.toLowerCase() + ' ')) label = label.slice(c.name.length + 1);
+          const emo = l.profileEmotion && emotionMeta(l.profileEmotion);
+          if (emo) label = emo.label;
+          else if (label.toLowerCase().startsWith(c.name.toLowerCase() + ' ')) label = label.slice(c.name.length).replace(/^[\s·(-]+|\)$/g, '');
           speaker = `${c.name} (${label})`;
           voiceId = l.variantId;
         }
@@ -965,7 +1024,7 @@
             name: name.trim(),
             script: $('scriptInput').value,
             title: $('sceneTitle').value,
-            mapping: state.cast.map(c => ({ name: c.name, script_name: c.scriptName, key: c.key, voice_id: c.voiceId, description: c.description })),
+            mapping: state.cast.map(c => ({ name: c.name, script_name: c.scriptName, key: c.key, voice_id: c.voiceId, profile_id: c.profileId || '', description: c.description })),
             lines: state.lines,
             temperature: rawTemp(),
           }),
@@ -983,10 +1042,11 @@
       $('sceneTitle').value = c.title || ''; $('sceneTitle').dataset.auto = '0';
       state.cast = (c.mapping || []).map(m => ({
         key: m.key || m.name, scriptName: m.script_name || m.name, name: m.name, description: m.description || '',
-        voiceId: voiceById(m.voice_id) ? m.voice_id : '',
+        voiceId: voiceById(m.voice_id) ? m.voice_id : '', profileId: m.profile_id && profileById(m.profile_id) ? m.profile_id : '',
         newVoice: newVoiceState(!voiceById(m.voice_id), m.description),
       }));
-      state.lines = (c.lines || []).map(l => ({ speaker: l.speaker, text: l.text, direction: l.direction || '', variantId: l.variantId || '' }));
+      state.lines = (c.lines || []).map(l => ({ ...l, direction: l.direction || '', variantId: l.variantId || '' }));
+      applyAllProfiles();
       if (c.temperature !== null && c.temperature !== undefined) { $('tempAuto').checked = false; $('tempSlider').value = c.temperature; }
       else { $('tempAuto').checked = true; }
       syncTemp();
@@ -1041,9 +1101,9 @@ MARK: ...Dav from upstairs?`;
         localStorage.setItem(DRAFT_KEY, JSON.stringify({
           script: $('scriptInput').value,
           title: $('sceneTitle').value,
-          cast: state.cast.map(c => ({ key: c.key, scriptName: c.scriptName, name: c.name, description: c.description, voiceId: c.voiceId,
+          cast: state.cast.map(c => ({ key: c.key, scriptName: c.scriptName, name: c.name, description: c.description, voiceId: c.voiceId, profileId: c.profileId || '',
             newVoice: { open: c.newVoice.open, description: c.newVoice.description, sample: c.newVoice.sample } })),
-          lines: state.lines.map(l => ({ speaker: l.speaker, text: l.text, direction: l.direction, variantId: l.variantId })),
+          lines: state.lines.map(l => ({ speaker: l.speaker, text: l.text, direction: l.direction, emotion: l.emotion || '', variantId: l.variantId, variantManual: !!l.variantManual, profileEmotion: l.profileEmotion || '' })),
           temperature: rawTemp(),
           pause: $('pauseMs').value,
           continuity: $('continuity').checked,
@@ -1060,6 +1120,8 @@ MARK: ...Dav from upstairs?`;
       state.cast = (d.cast || []).map(c => ({ ...c, voiceId: voiceById(c.voiceId) ? c.voiceId : '',
         newVoice: { ...newVoiceState(c.newVoice.open || !voiceById(c.voiceId), c.newVoice.description), sample: c.newVoice.sample || '' } }));
       state.lines = (d.lines || []).map(l => ({ ...l, variantId: voiceById(l.variantId) ? l.variantId : '' }));
+      state.cast.forEach(c => { if (c.profileId && !profileById(c.profileId)) c.profileId = ''; });
+      applyAllProfiles();
       if (d.temperature !== null && d.temperature !== undefined) { $('tempAuto').checked = false; $('tempSlider').value = d.temperature; }
       if (d.pause) $('pauseMs').value = d.pause;
       if (d.continuity === false) $('continuity').checked = false;

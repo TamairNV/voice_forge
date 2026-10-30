@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VoiceForge Clone Studio</title>
+  <style>
+    :root {
+      --bg-base: #080a0f;
+      --bg-panel: #10141d;
+      --bg-card: #161b28;
+      --bg-input: #0b0e15;
+      --border: #232b3e;
+      --border-light: #2e3852;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --accent-indigo: #6366f1;
+      --accent-violet: #8b5cf6;
+      --accent-emerald: #10b981;
+      --accent-amber: #f59e0b;
+      --accent-rose: #f43f5e;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif;
+      background: radial-gradient(circle at 12% 0%, #161a2e 0%, var(--bg-base) 60%) fixed;
+      color: var(--text-main); font-size: 13px; line-height: 1.45; -webkit-font-smoothing: antialiased;
+    }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-thumb { background: #283147; border-radius: 999px; }
+    header {
+      position: sticky; top: 0; z-index: 40; min-height: 54px; display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; padding: 8px 20px; background: rgba(16, 20, 29, 0.92); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .brand-icon {
+      width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, var(--accent-indigo), var(--accent-violet)); font-weight: 800; font-size: 14px; color: #fff;
+    }
+    .brand-title { font-size: 15px; font-weight: 700; letter-spacing: -0.02em; }
+    .brand-sub { font-size: 11px; color: var(--text-muted); }
+    @media (max-width: 600px) { header { padding: 8px 16px; } .brand-sub { display: none; } }
+
+    main { display: grid; grid-template-columns: 300px 1fr; gap: 16px; padding: 16px 20px 110px; max-width: 1500px; margin: 0 auto; }
+    @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 12px 16px 110px; } }
+    .col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+    .panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+    .panel-title { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 10px; }
+    .sticky { position: sticky; top: 70px; }
+    @media (max-width: 900px) { .sticky { position: static; } }
+    input[type=text], textarea, select {
+      background: var(--bg-input); border: 1px solid var(--border); color: var(--text-main); border-radius: 8px; padding: 7px 10px; font: inherit; outline: none; width: 100%;
+    }
+    input:focus, textarea:focus, select:focus { border-color: var(--accent-indigo); }
+    textarea { resize: vertical; line-height: 1.5; }
+    .btn, .btn-sm {
+      display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid var(--border); background: var(--bg-panel);
+      color: var(--text-main); cursor: pointer; font-family: inherit; font-weight: 600; white-space: nowrap; text-decoration: none; transition: all 0.14s;
+    }
+    .btn { padding: 8px 14px; border-radius: 8px; font-size: 13px; }
+    .btn-sm { padding: 5px 10px; border-radius: 6px; font-size: 11.5px; }
+    .btn:hover, .btn-sm:hover { border-color: var(--accent-indigo); background: rgba(99, 102, 241, 0.16); }
+    .btn.primary { background: linear-gradient(135deg, var(--accent-indigo), var(--accent-violet)); border-color: transparent; color: #fff; }
+    .btn-sm.emerald { border-color: rgba(16, 185, 129, 0.45); color: #6ee7b7; }
+    .btn-sm.rose { border-color: rgba(244, 63, 94, 0.4); color: #fda4af; }
+    .btn-sm.violet { border-color: rgba(139, 92, 246, 0.5); color: #c4b5fd; }
+    .btn-sm.rec { border-color: rgba(244, 63, 94, 0.6); color: #fecdd3; background: rgba(244, 63, 94, 0.12); }
+    .btn-sm:disabled, .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .row.nowrap { flex-wrap: nowrap; }
+    .grow { flex: 1; min-width: 0; }
+    .dim { color: var(--text-dim); font-size: 11.5px; }
+    .muted { color: var(--text-muted); }
+
+    .profile-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; }
+    .profile-item:hover { background: var(--bg-card); }
+    .profile-item.active { background: rgba(99, 102, 241, 0.14); border-color: rgba(99, 102, 241, 0.45); }
+    .avatar { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; background: linear-gradient(135deg, #312e81, #5b21b6); flex-shrink: 0; }
+    .coverage { height: 4px; border-radius: 999px; background: var(--bg-input); overflow: hidden; margin-top: 4px; }
+    .coverage > div { height: 100%; background: linear-gradient(90deg, var(--accent-emerald), #34d399); }
+
+    details.tips summary { cursor: pointer; font-weight: 700; list-style: none; }
+    details.tips summary::-webkit-details-marker { display: none; }
+    .tips ul { margin: 8px 0 0 16px; display: flex; flex-direction: column; gap: 6px; color: var(--text-muted); font-size: 12px; }
+    .tips li b { color: var(--text-main); }
+
+    .slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+    @media (max-width: 420px) { .slots { grid-template-columns: 1fr; } }
+    .slot { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+    .slot.done { border-color: rgba(16, 185, 129, 0.4); }
+    .slot.recording { border-color: var(--accent-rose); box-shadow: 0 0 0 1px var(--accent-rose) inset; }
+    .slot-head { display: flex; align-items: center; gap: 8px; }
+    .slot-icon { font-size: 20px; }
+    .slot-title { font-size: 14px; font-weight: 700; flex: 1; }
+    .badge { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-muted); white-space: nowrap; }
+    .badge.ok { color: #6ee7b7; border-color: rgba(16, 185, 129, 0.4); }
+    .badge.warn { color: #fcd34d; border-color: rgba(245, 158, 11, 0.45); }
+    .badge.bad { color: #fda4af; border-color: rgba(244, 63, 94, 0.45); }
+    .how { font-size: 11.5px; color: #c4b5fd; }
+    .script { background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; font-size: 13.5px; line-height: 1.55; }
+    .script[contenteditable]:focus { outline: none; border-color: var(--accent-indigo); }
+    .meter { height: 8px; border-radius: 999px; background: var(--bg-input); overflow: hidden; position: relative; }
+    .meter > div { height: 100%; width: 0; background: linear-gradient(90deg, #10b981 0%, #10b981 65%, #f59e0b 80%, #f43f5e 95%); background-size: 100% 100%; transition: width 0.05s; }
+    .countdown { font-size: 28px; font-weight: 800; text-align: center; color: #fda4af; }
+    .quality { font-size: 11.5px; color: var(--text-muted); display: flex; flex-direction: column; gap: 3px; }
+    .quality .tip { color: #fcd34d; }
+    .clip-ref { font-size: 11px; color: var(--text-dim); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .empty { padding: 30px; text-align: center; color: var(--text-dim); border: 1px dashed var(--border-light); border-radius: 10px; }
+
+    .now-playing {
+      position: fixed; right: 16px; bottom: 16px; z-index: 90; width: min(380px, calc(100vw - 32px));
+      display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px;
+      background: var(--bg-card); border: 1px solid var(--border-light); box-shadow: 0 8px 30px rgba(0,0,0,0.45);
+      transform: translateY(20px); opacity: 0; pointer-events: none; transition: all 0.18s;
+    }
+    .now-playing.show { transform: translateY(0); opacity: 1; pointer-events: auto; }
+    .np-main { flex: 1; min-width: 0; }
+    .np-label { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .np-track { height: 6px; margin-top: 6px; border-radius: 999px; background: var(--bg-input); cursor: pointer; overflow: hidden; }
+    .np-progress { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent-indigo), var(--accent-violet)); }
+    .toast {
+      position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%) translateY(20px); opacity: 0; pointer-events: none;
+      background: var(--bg-card); border: 1px solid var(--border-light); padding: 9px 14px; border-radius: 10px; transition: all 0.2s; z-index: 99; max-width: 90vw;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .spinner { width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.25); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="brand-icon">VF</div>
+      <div>
+        <div class="brand-title">Clone Studio</div>
+        <div class="brand-sub">Record one person in every emotion; scenes pick the right clip per line</div>
+      </div>
+    </div>
+    <div class="row">
+      <a class="btn-sm" href="/cast">🎭 Casting Desk</a>
+      <a class="btn-sm" href="/voices">🗂 Voices</a>
+      <a class="btn-sm" href="/">← Studio</a>
+    </div>
+  </header>
+
+  <main>
+    <div class="col">
+      <div class="panel">
+        <div class="panel-title"><span>Character profiles</span></div>
+        <div id="profileList"></div>
+        <div class="row nowrap" style="margin-top: 10px;">
+          <input type="text" id="newName" placeholder="New person, e.g. Tamair" onkeydown="if (event.key === 'Enter') createProfile()" />
+          <button class="btn-sm emerald" onclick="createProfile()">+ Add</button>
+        </div>
+      </div>
+
+      <div class="panel sticky">
+        <div class="panel-title"><span>Microphone</span></div>
+        <select id="micSelect" onchange="savePrefs()"><option value="">Default microphone</option></select>
+        <div class="row" style="margin-top: 8px;">
+          <button class="btn-sm" id="micTestBtn" onclick="toggleMicTest()">🎚 Test level</button>
+          <div class="meter grow"><div id="testMeter"></div></div>
+        </div>
+        <div class="dim" style="margin-top: 6px;">Speak at performance volume. Aim for the bar to reach the yellow on loud words and never hit red.</div>
+
+        <details class="tips" open style="margin-top: 14px;">
+          <summary>🎙 Why recordings sound strange, and how to fix it</summary>
+          <ul>
+            <li><b>It's not just you.</b> Everyone hates hearing their own recorded voice, because normally you also hear yourself through your skull. The recording is what others hear.</li>
+            <li><b>Processing is switched off here.</b> Browsers and call apps run noise suppression, echo cancelling and auto-gain, which make voices sound watery and robotic. This page records the raw mic.</li>
+            <li><b>A hand-span away.</b> Keep the mic 15-20 cm from your mouth, slightly off to the side so P and B sounds don't pop.</li>
+            <li><b>Soft room.</b> Bare walls make echo, which gets cloned. A bedroom with curtains, a wardrobe full of clothes, or a duvet over your head works wonders. Turn off fans and the TV.</li>
+            <li><b>Same mic, same spot</b> for every emotion, so the profile sounds like one person. A phone voice memo app often beats a laptop mic.</li>
+            <li><b>Act it, don't read it.</b> Read the line twice silently first, then perform it as if it's real. Stand up for energy; smile for happy lines.</li>
+            <li><b>8-12 seconds, one emotion.</b> Leave half a second of silence at the start and end. If you stumble, just retake.</li>
+            <li><b>Loud emotions:</b> step back for shouting so it doesn't distort; lean in a little for whispers.</li>
+          </ul>
+        </details>
+      </div>
+    </div>
+
+    <div class="col" id="profileView">
+      <div class="panel"><div class="empty">Add a person on the left to start recording their voice.</div></div>
+    </div>
+  </main>
+
+  <div class="now-playing" id="nowPlaying">
+    <button class="btn-sm" id="npToggle" onclick="player && player.ended ? (player.currentTime = 0, player.play()) : togglePlayback()">⏸</button>
+    <div class="np-main">
+      <div class="row nowrap" style="justify-content: space-between;"><span id="npLabel" class="np-label"></span><span id="npTime" class="dim"></span></div>
+      <div class="np-track" onclick="seekNowPlaying(event)"><div class="np-progress" id="npProgress"></div></div>
+    </div>
+    <button class="btn-sm rose" onclick="stopPlayback()" title="Stop (Esc)">⏹</button>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const TEST_TEMP = 0.95;
+    const state = {
+      emotions: [], profiles: [], roster: [], activeId: null,
+      scriptIdx: {},      // emotion -> index into its suggested scripts
+      customScript: {},   // emotion -> text (edited or Claude-written)
+      takes: {},          // emotion -> {blob, url} recorded but not saved yet
+      results: {},        // emotion -> last save result (quality, heard)
+      recording: null,    // {emotion, recorder, stream, started}
+      busy: {},
+    };
+    let player = null, playerUrl = null;
+
+    function $(id) { return document.getElementById(id); }
+    function escapeHtml(str) {
+      return String(str ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    }
+    function toast(msg, ms = 3200) {
+      const t = $('toast'); t.textContent = msg; t.classList.add('show');
+      clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), ms);
+    }
+    async function api(path, opts = {}) {
+      const isForm = opts.body instanceof FormData;
+      const res = await fetch(path, { headers: isForm ? {} : { 'Content-Type': 'application/json' }, ...opts });
+      let data = null;
+      try { data = await res.json(); } catch (e) { /* non-JSON */ }
+      if (!res.ok) throw new Error(data && data.detail ? (typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)) : res.statusText);
+      return data;
+    }
+
+    // ---------------------------------------------------------------- player
+    function play(url, label) {
+      if (player && playerUrl === url && !player.ended) { if (player.paused) player.play(); else player.pause(); return; }
+      stopPlayback();
+      playerUrl = url;
+      player = new Audio(url.startsWith('blob:') || url.includes('?') ? url : url + '?t=' + Date.now());
+      player.dataset.label = label || 'Preview';
+      ['play', 'pause', 'ended', 'timeupdate', 'loadedmetadata'].forEach(ev => player.addEventListener(ev, updateNowPlaying));
+      player.play().catch(e => toast('Could not play: ' + e.message));
+      updateNowPlaying();
+    }
+    function stopPlayback() { if (player) { player.pause(); player.src = ''; } player = null; playerUrl = null; updateNowPlaying(); }
+    function togglePlayback() { if (player) { if (player.paused) player.play(); else player.pause(); } }
+    function fmtTime(t) { t = Math.max(0, t || 0); return Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0'); }
+    function updateNowPlaying() {
+      const bar = $('nowPlaying');
+      if (!player) { bar.classList.remove('show'); return; }
+      bar.classList.add('show');
+      $('npToggle').textContent = player.ended ? '↻' : (player.paused ? '▶' : '⏸');
+      $('npLabel').textContent = player.dataset.label;
+      $('npTime').textContent = `${fmtTime(player.currentTime)} / ${fmtTime(isFinite(player.duration) ? player.duration : 0)}`;
+      $('npProgress').style.width = player.duration && isFinite(player.duration) ? (player.currentTime / player.duration * 100) + '%' : '0%';
+    }
+    function seekNowPlaying(e) {
+      if (!player || !player.duration || !isFinite(player.duration)) return;
+      const r = e.currentTarget.getBoundingClientRect();
+      player.currentTime = (e.clientX - r.left) / r.width * player.duration;
+    }
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && player) stopPlayback(); });
+
+    // ------------------------------------------------------------------ data
+    function active() { return state.profiles.find(p => p.id === state.activeId); }
+    function clipFor(p, emo) { return (p.clips || []).find(c => c.emotion === emo); }
+    async function loadAll() {
+      const [e, p, r] = await Promise.all([api('/api/profiles/emotions'), api('/api/profiles'), api('/api/characters')]);
+      state.emotions = e.emotions;
+      state.profiles = p.profiles;
+      state.roster = r.characters;
+      if (!active() && state.profiles.length) state.activeId = prefs().active && state.profiles.some(x => x.id === prefs().active) ? prefs().active : state.profiles[0].id;
+      renderProfiles(); renderProfile();
+    }
+    function prefs() { try { return JSON.parse(localStorage.getItem('vf_clone_prefs') || '{}'); } catch (e) { return {}; } }
+    function savePrefs() { try { localStorage.setItem('vf_clone_prefs', JSON.stringify({ mic: $('micSelect').value, active: state.activeId })); } catch (e) { /* ignore */ } }
+
+    // -------------------------------------------------------------- profiles
+    function renderProfiles() {
+      const n = state.emotions.length || 13;
+      $('profileList').innerHTML = state.profiles.length ? state.profiles.map(p => `
+        <div class="profile-item ${p.id === state.activeId ? 'active' : ''}" onclick="selectProfile('${p.id}')">
+          <div class="avatar">${escapeHtml(p.name.charAt(0).toUpperCase())}</div>
+          <div class="grow">
+            <div style="font-weight: 700;">${escapeHtml(p.name)}</div>
+            <div class="dim">${p.clips.length} of ${n} emotions</div>
+            <div class="coverage"><div style="width: ${p.clips.length / n * 100}%"></div></div>
+          </div>
+        </div>`).join('') : '<div class="dim">No profiles yet.</div>';
+    }
+    function selectProfile(id) { state.activeId = id; state.takes = {}; state.results = {}; savePrefs(); renderProfiles(); renderProfile(); }
+    async function createProfile() {
+      const name = $('newName').value.trim();
+      if (!name) { toast('Type a name first.'); return; }
+      try {
+        const d = await api('/api/profiles', { method: 'POST', body: JSON.stringify({ name }) });
+        state.profiles = d.profiles; state.activeId = d.profile.id; $('newName').value = '';
+        savePrefs(); renderProfiles(); renderProfile();
+        toast(`Created ${name}. Start with Neutral, then work through the emotions you'll need.`, 4500);
+      } catch (e) { toast('Failed: ' + e.message); }
+    }
+    async function updateProfile(field, value) {
+      const p = active();
+      try { const d = await api(`/api/profiles/${p.id}`, { method: 'PATCH', body: JSON.stringify({ [field]: value }) }); state.profiles = d.profiles; renderProfiles(); }
+      catch (e) { toast('Failed: ' + e.message); }
+    }
+    async function deleteProfile() {
+      const p = active();
+      if (!confirm(`Delete the profile "${p.name}"?`)) return;
+      const alsoVoices = p.clips.length && confirm(`Also delete the clips you recorded for ${p.name} from the Voice Library? (Voices you linked in from the library are always kept.)\n\nOK = delete them too, Cancel = keep them as separate voices.`);
+      const d = await api(`/api/profiles/${p.id}?delete_voices=${alsoVoices ? 'true' : 'false'}`, { method: 'DELETE' });
+      state.profiles = d.profiles; state.activeId = state.profiles[0] ? state.profiles[0].id : null;
+      savePrefs(); renderProfiles(); renderProfile();
+    }
+
+    function scriptFor(emo) {
+      if (state.customScript[emo]) return state.customScript[emo];
+      const e = state.emotions.find(x => x.id === emo);
+      return e.scripts[(state.scriptIdx[emo] || 0) % e.scripts.length];
+    }
+    function renderProfile() {
+      const p = active();
+      if (!p) { $('profileView').innerHTML = '<div class="panel"><div class="empty">Add a person on the left to start recording their voice.</div></div>'; return; }
+      const done = p.clips.length;
+      const nextEmpty = state.emotions.find(e => !clipFor(p, e.id));
+      $('profileView').innerHTML = `
+        <div class="panel">
+          <div class="row nowrap">
+            <div class="avatar" style="width: 40px; height: 40px; font-size: 18px;">${escapeHtml(p.name.charAt(0).toUpperCase())}</div>
+            <input type="text" value="${escapeHtml(p.name)}" style="font-size: 16px; font-weight: 700;" onchange="updateProfile('name', this.value)" title="Rename profile" />
+            <button class="btn-sm rose" onclick="deleteProfile()">🗑</button>
+          </div>
+          <input type="text" style="margin-top: 8px;" placeholder="Notes about this voice (optional), e.g. 'my natural voice, slight Midlands accent'" value="${escapeHtml(p.description || '')}" onchange="updateProfile('description', this.value)" />
+          <div class="row" style="margin-top: 10px;">
+            <span class="badge ${done ? 'ok' : 'warn'}">${done} of ${state.emotions.length} emotions recorded</span>
+            ${nextEmpty ? `<button class="btn-sm" onclick="document.getElementById('slot_${nextEmpty.id}').scrollIntoView({behavior: 'smooth', block: 'center'})">Next to record: ${nextEmpty.icon} ${nextEmpty.label}</button>` : '<span class="badge ok">All emotions covered 🎉</span>'}
+            <span class="dim">In the Casting Desk, pick <b>👤 ${escapeHtml(p.name)}</b> as a character's voice and each line uses the closest emotion.</span>
+          </div>
+          <div class="row nowrap" style="margin-top: 10px;">
+            <input type="text" id="testLine" placeholder="Type a line to hear ${escapeHtml(p.name)} say it…" onkeydown="if (event.key === 'Enter') testProfile(document.getElementById('testBtn'))" />
+            <select id="testEmotion" style="width: 150px;">
+              <option value="auto">Auto emotion</option>
+              ${state.emotions.map(e => `<option value="${e.id}" ${clipFor(p, e.id) ? '' : 'disabled'}>${e.icon} ${e.label}</option>`).join('')}
+            </select>
+            <button class="btn-sm violet" id="testBtn" onclick="testProfile(this)" ${done ? '' : 'disabled'}>🗣 Say</button>
+          </div>
+        </div>
+        <div class="slots">${state.emotions.map(e => slotCard(p, e)).join('')}</div>`;
+    }
+    function qualityBadge(q) {
+      if (!q) return '';
+      const cls = q.score >= 80 ? 'ok' : q.score >= 55 ? 'warn' : 'bad';
+      return `<span class="badge ${cls}" title="Speech ${q.speech_dbfs} dBFS · noise ${q.noise_floor_dbfs} dBFS · peak ${q.peak_dbfs} dBFS">mic ${q.score}/100</span>`;
+    }
+    function slotCard(p, e) {
+      const clip = clipFor(p, e.id);
+      const take = state.takes[e.id];
+      const rec = state.recording && state.recording.emotion === e.id;
+      const busy = state.busy[e.id];
+      const res = state.results[e.id];
+      const q = (res && res.quality) || (clip && clip.quality);
+      const otherVoices = state.roster.filter(v => !p.clips.some(c => c.character_id === v.id));
+      return `
+      <div class="slot ${clip ? 'done' : ''} ${rec ? 'recording' : ''}" id="slot_${e.id}">
+        <div class="slot-head">
+          <span class="slot-icon">${e.icon}</span>
+          <span class="slot-title">${e.label}</span>
+          ${clip ? `<span class="badge ok">✓ recorded</span>` : '<span class="badge">empty</span>'}
+          ${qualityBadge(q)}
+        </div>
+        <div class="how">How: ${escapeHtml(e.how)}</div>
+        <div class="script" contenteditable="true" id="script_${e.id}" oninput="state.customScript['${e.id}'] = this.innerText" title="Read this aloud. You can edit it.">${escapeHtml(scriptFor(e.id))}</div>
+        <div class="row">
+          <button class="btn-sm" onclick="nextScript('${e.id}')" title="Another suggested line">🔀 Another line</button>
+          <button class="btn-sm violet" onclick="claudeScript('${e.id}', this)" title="Claude writes a fresh line for this emotion, fitting the profile notes">✨ Write one</button>
+        </div>
+        ${rec ? `
+          ${state.recording.countdown ? `<div class="countdown">${state.recording.countdown}</div>` : `
+          <div class="row nowrap"><span class="badge bad">● REC <span id="recTime">0.0</span>s</span><div class="meter grow"><div id="recMeter"></div></div></div>`}
+          <button class="btn-sm rec" onclick="stopRecording()">⏹ Stop</button>` : `
+        <div class="row">
+          <button class="btn-sm rec" onclick="startRecording('${e.id}')" ${busy || state.recording ? 'disabled' : ''}>⏺ ${clip ? 'Re-record' : 'Record'}</button>
+          <label class="btn-sm" ${busy ? 'style="opacity:0.45; pointer-events:none;"' : ''}>📁 Upload<input type="file" accept="audio/*,video/mp4,.wav,.mp3,.m4a,.mp4,.mov,.webm,.flac,.ogg,.aac" style="display:none" onchange="uploadTake('${e.id}', this)" /></label>
+          ${clip ? `<button class="btn-sm" onclick="play('${clip.url}', ${escapeHtml(JSON.stringify(p.name + ' · ' + e.label + ' (saved clip)'))})">▶ Saved clip</button>
+                    <button class="btn-sm violet" onclick="testSlot('${e.id}', this)" title="Generate a new line from this clip">🗣 Test</button>` : ''}
+        </div>`}
+        ${take ? `
+          <div class="row" style="padding: 8px; border-radius: 8px; background: var(--bg-input);">
+            <span class="dim grow">New take · ${take.seconds.toFixed(1)}s ${take.seconds < 5 ? '(a bit short)' : ''}</span>
+            <button class="btn-sm" onclick="play('${take.url}', 'New take · ${e.label}')">▶ Listen back</button>
+            <button class="btn-sm emerald" onclick="saveTake('${e.id}', this)" ${busy ? 'disabled' : ''}>${busy ? '<span class="spinner"></span> Saving…' : '✓ Use this take'}</button>
+            <button class="btn-sm" onclick="discardTake('${e.id}')">✕</button>
+          </div>` : ''}
+        ${res ? `
+          <div class="quality">
+            ${res.used_script_as_transcript ? '<span>✓ Transcript matches the script.</span>' : `<span>Heard: “${escapeHtml(res.heard)}” (${Math.round((res.script_match || 0) * 100)}% match, so the heard words are used as the transcript)</span>`}
+            ${(res.quality && res.quality.tips.length) ? res.quality.tips.map(t => `<span class="tip">⚠ ${escapeHtml(t)}</span>`).join('') : (res.quality ? '<span style="color:#6ee7b7;">✓ Levels and noise look good.</span>' : '')}
+          </div>` : (clip ? `<div class="clip-ref" title="${escapeHtml(clip.ref_text)}">“${escapeHtml(clip.ref_text)}”</div>` : '')}
+        <div class="row">
+          <select class="grow" style="font-size: 11.5px; padding: 4px 6px;" onchange="if (this.value) linkVoice('${e.id}', this.value)">
+            <option value="">🔗 Use an existing voice instead…</option>
+            ${otherVoices.map(v => `<option value="${v.id}">${escapeHtml(v.name)}</option>`).join('')}
+          </select>
+          ${clip ? `<button class="btn-sm rose" onclick="unlinkClip('${e.id}')" title="Remove from this profile (the voice stays in the library)">✕</button>` : ''}
+        </div>
+      </div>`;
+    }
+    function nextScript(emo) { delete state.customScript[emo]; state.scriptIdx[emo] = (state.scriptIdx[emo] || 0) + 1; renderProfile(); }
+    async function claudeScript(emo, btn) {
+      btn.innerHTML = '<span class="spinner"></span>'; btn.disabled = true;
+      try {
+        const p = active();
+        const d = await api('/api/profiles/prompts', { method: 'POST', body: JSON.stringify({ emotion: emo, context: `${p.name}. ${p.description || ''}` }) });
+        state.customScript[emo] = d.script;
+        renderProfile();
+        if (d.how) toast('How to say it: ' + d.how, 6000);
+      } catch (e) { toast('Claude failed: ' + e.message, 6000); btn.innerHTML = '✨ Write one'; btn.disabled = false; }
+    }
+
+    // ------------------------------------------------------------- recording
+    function micConstraints() {
+      // Raw mic: browser voice processing is the main reason recordings sound watery or robotic
+      const audio = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 };
+      if ($('micSelect').value) audio.deviceId = { exact: $('micSelect').value };
+      return { audio };
+    }
+    async function listMics() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const mics = devices.filter(d => d.kind === 'audioinput');
+        const saved = prefs().mic || '';
+        $('micSelect').innerHTML = '<option value="">Default microphone</option>' + mics.map((m, i) =>
+          `<option value="${m.deviceId}" ${m.deviceId === saved ? 'selected' : ''}>${escapeHtml(m.label || 'Microphone ' + (i + 1))}</option>`).join('');
+      } catch (e) { /* no media devices */ }
+    }
+    function attachMeter(stream, elId) {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = ctx.createMediaStreamSource(stream);
+      const an = ctx.createAnalyser(); an.fftSize = 1024;
+      src.connect(an);
+      const buf = new Float32Array(an.fftSize);
+      let raf;
+      const tick = () => {
+        an.getFloatTimeDomainData(buf);
+        let peak = 0; for (const v of buf) peak = Math.max(peak, Math.abs(v));
+        const db = 20 * Math.log10(peak + 1e-9);            // -60..0 dBFS -> 0..100%
+        const el = $(elId); if (el) el.style.width = Math.max(0, Math.min(100, (db + 60) / 60 * 100)) + '%';
+        raf = requestAnimationFrame(tick);
+      };
+      tick();
+      return () => { cancelAnimationFrame(raf); ctx.close(); };
+    }
+    let micTest = null;
+    async function toggleMicTest() {
+      if (micTest) { micTest.stop(); micTest = null; $('micTestBtn').textContent = '🎚 Test level'; $('testMeter').style.width = '0'; return; }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(micConstraints());
+        listMics();
+        const stopMeter = attachMeter(stream, 'testMeter');
+        micTest = { stop: () => { stopMeter(); stream.getTracks().forEach(t => t.stop()); } };
+        $('micTestBtn').textContent = '⏹ Stop test';
+      } catch (e) { toast('Microphone blocked: ' + e.message, 6000); }
+    }
+    async function startRecording(emo) {
+      if (micTest) toggleMicTest();
+      stopPlayback();
+      let stream;
+      try { stream = await navigator.mediaDevices.getUserMedia(micConstraints()); }
+      catch (e) { toast('Microphone blocked: ' + e.message + '. Allow mic access for this page.', 7000); return; }
+      listMics();
+      state.recording = { emotion: emo, stream, countdown: 3 };
+      renderProfile();
+      for (const n of [2, 1]) {
+        await new Promise(r => setTimeout(r, 700));
+        if (!state.recording) return;
+        state.recording.countdown = n; renderProfile();
+      }
+      await new Promise(r => setTimeout(r, 700));
+      if (!state.recording) return;
+      state.recording.countdown = 0;
+      renderProfile();
+      const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || '';
+      const recorder = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 192000 } : undefined);
+      const chunks = [];
+      recorder.ondataavailable = ev => { if (ev.data.size) chunks.push(ev.data); };
+      recorder.onstop = () => {
+        const type = recorder.mimeType || 'audio/webm';
+        const blob = new Blob(chunks, { type });
+        const seconds = (Date.now() - state.recording.started) / 1000;
+        stream.getTracks().forEach(t => t.stop());
+        state.recording.stopMeter && state.recording.stopMeter();
+        if (state.takes[emo] && state.takes[emo].url) URL.revokeObjectURL(state.takes[emo].url);
+        state.takes[emo] = { blob, url: URL.createObjectURL(blob), seconds, ext: type.includes('mp4') ? '.m4a' : '.webm' };
+        state.recording = null;
+        renderProfile();
+        play(state.takes[emo].url, 'New take · listen back');
+      };
+      state.recording.recorder = recorder;
+      state.recording.started = Date.now();
+      state.recording.stopMeter = attachMeter(stream, 'recMeter');
+      recorder.start(250);
+      state.recording.timer = setInterval(() => {
+        const t = $('recTime'); if (t && state.recording) t.textContent = ((Date.now() - state.recording.started) / 1000).toFixed(1);
+        if (state.recording && Date.now() - state.recording.started > 30000) stopRecording();  // safety cap
+      }, 100);
+    }
+    function stopRecording() {
+      const r = state.recording;
+      if (!r) return;
+      clearInterval(r.timer);
+      if (r.recorder && r.recorder.state !== 'inactive') r.recorder.stop();
+      else { r.stream.getTracks().forEach(t => t.stop()); state.recording = null; renderProfile(); }
+    }
+    document.addEventListener('keydown', e => {
+      if (e.code === 'Space' && state.recording && !state.recording.countdown && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) && !document.activeElement.isContentEditable) {
+        e.preventDefault(); stopRecording();
+      }
+    });
+    function discardTake(emo) { if (state.takes[emo]) URL.revokeObjectURL(state.takes[emo].url); delete state.takes[emo]; renderProfile(); }
+    async function saveTake(emo) {
+      const take = state.takes[emo];
+      if (!take) return;
+      await sendClip(emo, new File([take.blob], `${emo}${take.ext}`, { type: take.blob.type }));
+      discardTake(emo);
+    }
+    async function uploadTake(emo, input) {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      await sendClip(emo, file);
+      input.value = '';
+    }
+    async function sendClip(emo, file) {
+      const p = active();
+      const form = new FormData();
+      form.append('emotion', emo);
+      form.append('script', scriptFor(emo));
+      form.append('file', file);
+      state.busy[emo] = true; renderProfile();
+      try {
+        const d = await api(`/api/profiles/${p.id}/clips`, { method: 'POST', body: form });
+        state.profiles = d.profiles;
+        state.results[emo] = d;
+        const r = await api('/api/characters'); state.roster = r.characters;
+        const q = d.quality;
+        toast(q && q.tips.length ? `Saved, with ${q.tips.length} mic tip${q.tips.length === 1 ? '' : 's'}. Generating a test line…` : 'Saved. Generating a test line…', 5000);
+        renderProfiles();
+        state.busy[emo] = false; renderProfile();
+        await testSlot(emo, null);
+      } catch (e) { toast('Save failed: ' + e.message, 7000); }
+      state.busy[emo] = false; renderProfile();
+    }
+    async function linkVoice(emo, voiceId) {
+      const p = active();
+      try { const d = await api(`/api/profiles/${p.id}/clips/link`, { method: 'POST', body: JSON.stringify({ emotion: emo, character_id: voiceId }) }); state.profiles = d.profiles; }
+      catch (e) { toast('Failed: ' + e.message); }
+      delete state.results[emo];
+      renderProfiles(); renderProfile();
+    }
+    async function unlinkClip(emo) {
+      const p = active();
+      const d = await api(`/api/profiles/${p.id}/clips/${emo}`, { method: 'DELETE' });
+      state.profiles = d.profiles; delete state.results[emo];
+      renderProfiles(); renderProfile();
+    }
+
+    // ----------------------------------------------------------------- tests
+    const TEST_LINES = {
+      neutral: "Yeah, I'll be there around six. Do you want me to bring anything?",
+      happy: "That's amazing news, honestly, I'm so happy for you!",
+      excited: "We actually did it! I can't believe it worked!",
+      angry: "I told you not to touch it. I told you!",
+      annoyed: "Seriously? Again? Every single morning.",
+      sad: "I just thought he'd be here. That's all.",
+      scared: "Did you hear that? Something's outside the door.",
+      sarcastic: "Oh, great. Brilliant idea. Really well thought through.",
+      confused: "Wait, what? Since when do we have a cat?",
+      pleading: "Please, just this once. I'm begging you.",
+      tired: "I need to sit down. I've been on my feet all day.",
+      whispering: "Keep quiet, they're right outside.",
+      shouting: "Get out of the way! Move!",
+    };
+    async function speak(voiceId, text, label, btn) {
+      const old = btn ? btn.innerHTML : '';
+      if (btn) { btn.innerHTML = '<span class="spinner"></span>'; btn.disabled = true; }
+      try {
+        const d = await api('/api/synthesize', { method: 'POST', body: JSON.stringify({ model_id: 'qwen3_clone', character_id: voiceId, text, temperature: TEST_TEMP }) });
+        play(d.take.url, label);
+      } catch (e) { toast('Failed: ' + e.message, 6000); }
+      if (btn) { btn.innerHTML = old; btn.disabled = false; }
+    }
+    async function testSlot(emo, btn) {
+      const p = active();
+      const clip = clipFor(p, emo);
+      if (!clip) return;
+      const e = state.emotions.find(x => x.id === emo);
+      await speak(clip.character_id, TEST_LINES[emo] || TEST_LINES.neutral, `${p.name} · ${e.label} · test line`, btn);
+    }
+    async function testProfile(btn) {
+      const p = active();
+      const text = $('testLine').value.trim();
+      if (!text) { toast('Type a line first.'); return; }
+      let emo = $('testEmotion').value;
+      if (emo === 'auto') {
+        const d = await api(`/api/profiles/${p.id}/pick?text=${encodeURIComponent(text)}`);
+        emo = d.emotion;
+        if (!d.clip) { toast('Record at least one emotion first.'); return; }
+        const label = (state.emotions.find(x => x.id === d.clip.emotion) || {}).label || d.clip.emotion;
+        toast(`Using the ${label} clip.`);
+        return speak(d.clip.character_id, text, `${p.name} · ${label}`, btn);
+      }
+      const clip = clipFor(p, emo);
+      return speak(clip.character_id, text, `${p.name} · ${emo}`, btn);
+    }
+
+    listMics();
+    loadAll().catch(e => toast('Could not reach the server: ' + e.message));
+  </script>
+</body>
+</html>

@@ -177,7 +177,7 @@ class SynthesizeRequest(BaseModel):
     )
     temperature: Optional[float] = Field(
         None,
-        description="Native model sampling temperature (defaults to 0.58 for Qwen3 Clone, 0.85 for Qwen3 Design, plus a dynamic boost on emotional lines; 0.42 for Maya-1).",
+        description="Native model sampling temperature (defaults to 0.95 for Qwen3 Clone, 0.85 for Qwen3 Design, plus a dynamic boost on emotional lines; 0.42 for Maya-1).",
     )
     top_p: Optional[float] = Field(
         None,
@@ -2082,6 +2082,7 @@ EXTRACT_SCHEMA = {
                     "text": {"type": "string"},
                     "direction": {"type": "string"},
                     "variant_voice_id": {"type": "string"},
+                    "emotion": {"type": "string", "enum": ["neutral", "happy", "excited", "angry", "annoyed", "sad", "scared", "sarcastic", "confused", "pleading", "tired", "whispering", "shouting"]},
                 },
                 "required": ["speaker", "text"],
             },
@@ -2101,6 +2102,7 @@ EXTRACT_SYSTEM = (
     "The roster often holds emotion variants of one person (e.g. 'Phoebe', 'Phoebe Panicked', 'Phoebe Pleading'). When a line's mood "
     "clearly matches a variant of the voice you suggested for that speaker, put the variant's id in that line's variant_voice_id; "
     "otherwise leave it empty. Never pick a variant of a different person. "
+    "Tag every line with the single closest `emotion` from the allowed list (use 'neutral' when nothing stands out). "
     "If the input is only prose with no dialogue yet, write plausible lines that tell the same beats. "
     "Also suggest a short title."
 )
@@ -2133,7 +2135,12 @@ def _heuristic_extract(script: str) -> dict:
         "characters": list(seen.values()),
         # A short parenthetical like "(panting)" is an acting direction, not a voice description
         "lines": [
-            {"speaker": l.speaker.strip(), "text": l.text, "direction": "" if _is_voice_description(l.instruct) else (l.instruct or "")}
+            {
+                "speaker": l.speaker.strip(),
+                "text": l.text,
+                "direction": "" if _is_voice_description(l.instruct) else (l.instruct or ""),
+                "emotion": _emotion_from_text("" if _is_voice_description(l.instruct) else (l.instruct or ""), l.text),
+            }
             for l in lines
         ],
     }
@@ -2259,6 +2266,7 @@ def api_cast_extract(req: CastExtractRequest):
             "text": txt,
             "direction": str(l.get("direction") or "").strip(),
             "variant_voice_id": variant if variant in roster_ids else "",
+            "emotion": str(l.get("emotion") or "") or _emotion_from_text(str(l.get("direction") or ""), txt),
         })
 
     if not chars:
@@ -2458,6 +2466,417 @@ def api_delete_cast(cast_id: str):
     casts = [c for c in _read_json(CASTS_JSON, []) if c["id"] != cast_id]
     _write_json(CASTS_JSON, casts)
     return {"casts": casts}
+
+
+# ============================================================================
+# Clone Studio: character profiles holding one cloned clip per emotion
+# ============================================================================
+
+PROFILES_JSON = DATA_DIR / "profiles.json"
+
+# Each emotion: how to perform it, a few things to read (8-12s each), and which emotions can stand in for it.
+EMOTIONS: List[dict] = [
+    {"id": "neutral", "label": "Neutral", "icon": "🙂", "fallback": [],
+     "how": "Relaxed and conversational, like telling a mate about your day. Not a flat reading voice: let it rise and fall naturally.",
+     "scripts": [
+         "So I got to the station about ten minutes early, which never happens, and of course the train was already sitting there waiting for me.",
+         "Honestly, the best bit of the whole weekend was just sitting outside with a coffee and doing absolutely nothing for an hour.",
+         "Right, so the plan is we meet at the corner around seven, grab some food, and then see how everyone's feeling after that.",
+     ]},
+    {"id": "happy", "label": "Happy", "icon": "😄", "fallback": ["excited", "neutral"],
+     "how": "Smile while you speak; it really changes the sound. Warm, bright, a little laugh in the voice is great.",
+     "scripts": [
+         "No way, you actually remembered? That's so nice of you. Honestly, you've made my whole week, I didn't think anyone would notice.",
+         "Oh, this is brilliant. Look at it! It's exactly what I wanted. I can't believe you found the same one.",
+         "Ha, okay, that's genuinely the funniest thing I've heard all day. Tell it again, tell it again, I need to hear it properly.",
+     ]},
+    {"id": "excited", "label": "Excited", "icon": "🤩", "fallback": ["happy", "neutral"],
+     "how": "Fast, high energy, words tumbling out. Lean towards the mic a bit less so the louder bits don't clip.",
+     "scripts": [
+         "Wait, wait, wait, are you serious? We got the tickets? Front row? Oh my god, okay, I need to sit down, this is actually happening!",
+         "Guess what, guess what! They said yes! I start on Monday! I literally screamed in the car park, people were staring at me!",
+         "Okay, okay, listen to this idea, because it's genius. We take the van, we drive to the coast, and we don't come back until Sunday!",
+     ]},
+    {"id": "angry", "label": "Angry", "icon": "😠", "fallback": ["annoyed", "shouting", "neutral"],
+     "how": "Controlled fury: tight, clipped and forceful, but not screaming. Hit the consonants hard.",
+     "scripts": [
+         "No. Don't you dare tell me to calm down. I asked you three times, three times, and you looked me in the eye and said it was done.",
+         "You know what, I'm done being polite about it. You took it without asking, you broke it, and now you're blaming me?",
+         "Every single time. Every single time I trust you with something, this happens, and I'm the idiot for being surprised.",
+     ]},
+    {"id": "annoyed", "label": "Annoyed", "icon": "😤", "fallback": ["angry", "sarcastic", "neutral"],
+     "how": "Exasperated and fed up, lots of sighing energy. Not shouting, just completely over it.",
+     "scripts": [
+         "Oh, brilliant. Fantastic. So the one day I actually need the printer to work, it decides to have a little breakdown. Of course it does.",
+         "Can you just, can you not tap the table like that? I've asked you nicely about four times now and I'm losing my mind.",
+         "Right, so we're doing this again. Same argument, same ending. Wake me up when you've worked out where you left the keys.",
+     ]},
+    {"id": "sad", "label": "Sad", "icon": "😢", "fallback": ["tired", "neutral"],
+     "how": "Slower and softer, voice dropping at the end of sentences. Let it wobble or catch; don't push it.",
+     "scripts": [
+         "I just thought it would be different this time, you know? I really thought he'd come. I kept looking at the door all night.",
+         "It's fine. Honestly, it's fine. I'm not upset. I just, I wish someone had told me before I found out like that.",
+         "We used to sit right here every Sunday. It feels really strange coming back now that it's just me.",
+     ]},
+    {"id": "scared", "label": "Scared", "icon": "😨", "fallback": ["pleading", "excited", "neutral"],
+     "how": "Breathy, fast and shaky, a bit hushed as if someone might hear. Short panicked breaths between phrases are good.",
+     "scripts": [
+         "Did you hear that? No, listen, there's something outside. Something's moving by the window. Please tell me you locked the back door.",
+         "Okay, okay, don't panic. The lights just went off, that's all. It's fine. It's fine. Why is the door open? I closed that door.",
+         "Stop the car. Stop the car! There's someone standing in the road, right there, can you not see them?",
+     ]},
+    {"id": "sarcastic", "label": "Sarcastic", "icon": "🙄", "fallback": ["annoyed", "neutral"],
+     "how": "Dry and deadpan with exaggerated emphasis on the 'nice' words. Slight drawl.",
+     "scripts": [
+         "Oh wow, what an amazing surprise, you're late again. I was so worried you'd suddenly turn up on time and ruin the tradition.",
+         "No, no, please, take the last slice. You clearly need it more than me. I only paid for the whole pizza.",
+         "Yeah, great plan. Really solid. Nothing could possibly go wrong with driving there without a map at midnight.",
+     ]},
+    {"id": "confused", "label": "Confused", "icon": "🤔", "fallback": ["neutral"],
+     "how": "Puzzled and hesitant, questions going up at the end, little pauses while you work it out.",
+     "scripts": [
+         "Sorry, what? Hang on. So you're saying the meeting was yesterday? But the email said Thursday. Today's Thursday. Isn't it?",
+         "Wait, I don't get it. Why would you put the milk in the cupboard? And where's the cereal gone? Is it in the fridge?",
+         "Hold on, who's Dave? Is that the same Dave from before, or a different Dave? Because I'm really lost now.",
+     ]},
+    {"id": "pleading", "label": "Pleading", "icon": "🥺", "fallback": ["sad", "scared", "neutral"],
+     "how": "Desperate and earnest, voice pushing upward. Really mean it, as if this is your last chance.",
+     "scripts": [
+         "Please, just give me five minutes. That's all I'm asking. Five minutes and I'll explain everything, I promise, please.",
+         "Come on, don't do this. I'm begging you. I'll do anything, I'll do the dishes for a month, just please don't tell Mum.",
+         "I know I messed up. I know. But please, please don't leave like this. Just stay and talk to me.",
+     ]},
+    {"id": "tired", "label": "Tired", "icon": "😮‍💨", "fallback": ["sad", "neutral"],
+     "how": "Low energy and breathy, slow, yawning or out of breath. Let the words drag.",
+     "scripts": [
+         "I've been up since five. I haven't eaten. I just want to lie down on the floor right here and not move until tomorrow.",
+         "Give me a second. Those stairs. Why are there so many stairs? Who designed this building? Okay. I'm fine. I'm fine.",
+         "Mm, yeah, sounds good. Wake me up when we get there. Or don't. Honestly I could sleep for a week.",
+     ]},
+    {"id": "whispering", "label": "Whispering", "icon": "🤫", "fallback": ["scared", "neutral"],
+     "how": "A real hushed stage whisper with some voice in it, not pure air. Get a little closer to the mic and turn your input gain up.",
+     "scripts": [
+         "Shh, keep your voice down. She's in the next room. If she finds out we've been in here, we are both in so much trouble.",
+         "Okay, on three we run for the door. Don't look back, and whatever you do, don't step on the creaky floorboard.",
+         "Psst. Are you awake? I can't sleep. I think I heard something downstairs. Do you want to go and check?",
+     ]},
+    {"id": "shouting", "label": "Shouting", "icon": "📢", "fallback": ["angry", "excited", "neutral"],
+     "how": "Projecting across a room. Step back from the mic or turn the gain down so it doesn't distort; check the level meter stays out of the red.",
+     "scripts": [
+         "Oi! Get off the grass! Can you not read the sign? It's right there in massive letters! Off! Now!",
+         "Everyone out! The kitchen's on fire! Leave your bags, just get out of the building, right now, go, go, go!",
+         "I'm over here! Over here! Can you hear me? Throw the rope! No, the other way! The other way!",
+     ]},
+]
+EMOTION_IDS = [e["id"] for e in EMOTIONS]
+
+# Keywords in a line's acting direction that point at an emotion slot
+EMOTION_KEYWORDS: Dict[str, List[str]] = {
+    "shouting": ["shout", "yell", "scream", "bellow", "roar", "caps"],
+    "whispering": ["whisper", "hushed", "under breath", "murmur", "sotto voce"],
+    "angry": ["angry", "furious", "rage", "livid", "losing it", "seething", "fuming"],
+    "annoyed": ["annoyed", "irritated", "exasperat", "frustrat", "fed up", "impatient", "grumpy"],
+    "scared": ["scared", "afraid", "panic", "terrified", "nervous", "anxious", "fear", "frightened", "shaky"],
+    "sad": ["sad", "upset", "crying", "tearful", "defeated", "hurt", "heartbroken", "gloomy", "devastated"],
+    "pleading": ["plead", "beg", "desperate", "imploring"],
+    "sarcastic": ["sarcas", "deadpan", "dry", "mocking", "ironic", "snide"],
+    "confused": ["confus", "puzzled", "baffled", "bewildered", "unsure", "lost"],
+    "excited": ["excited", "thrilled", "ecstatic", "enthusias", "hyped", "elated"],
+    "happy": ["happy", "cheerful", "warm", "delighted", "laugh", "amused", "joyful", "pleased", "smiling"],
+    "tired": ["tired", "exhausted", "weary", "sleepy", "winded", "out of breath", "panting", "yawn"],
+}
+
+
+def _emotion_from_text(direction: str, text: str = "") -> str:
+    d = (direction or "").lower()
+    for emo, words in EMOTION_KEYWORDS.items():
+        if any(w in d for w in words):
+            return emo
+    letters = [c for c in text if c.isalpha()]
+    if letters and sum(c.isupper() for c in letters) / len(letters) > 0.7 and len(letters) > 6:
+        return "shouting"
+    return "neutral"
+
+
+def _pick_profile_clip(profile: dict, emotion: str) -> Optional[dict]:
+    """Best clip for an emotion: exact slot, then that emotion's stand-ins, then neutral, then anything recorded."""
+    clips = {c["emotion"]: c for c in profile.get("clips", [])}
+    if not clips:
+        return None
+    meta = next((e for e in EMOTIONS if e["id"] == emotion), None)
+    for emo in [emotion] + (meta["fallback"] if meta else []) + ["neutral"]:
+        if emo in clips:
+            return clips[emo]
+    return next(iter(clips.values()))
+
+
+def _analyze_recording(path: Union[str, Path]) -> dict:
+    """Level, noise and clipping check for a reference recording, with plain-English tips."""
+    audio, sr = sf.read(str(path), dtype="float32", always_2d=False)
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+    duration = audio.shape[0] / sr
+    eps = 1e-9
+    peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+    hop = max(1, int(sr * 0.02))
+    n = audio.shape[0] // hop
+    frames = audio[: n * hop].reshape(n, hop) if n else np.zeros((1, hop), dtype=np.float32)
+    rms = np.sqrt(np.mean(frames ** 2, axis=1))
+    speech_db = 20 * np.log10(float(np.percentile(rms, 90)) + eps)
+    noise_db = 20 * np.log10(float(np.percentile(rms, 10)) + eps)
+    clipped = float(np.mean(np.abs(audio) > 0.985)) if audio.size else 0.0
+    tips = []
+    if clipped > 0.0005 or peak > 0.995:
+        tips.append("It clipped (too loud). Back off the mic a little or lower the input gain; distortion gets cloned too.")
+    elif speech_db < -32:
+        tips.append("Quite quiet. Move a bit closer (about a hand-span away) or raise the input gain.")
+    if noise_db > -50:
+        tips.append("Noticeable background noise between words. Turn off fans or AC, close the window, record in a room with soft furnishings.")
+    if speech_db - noise_db < 25:
+        tips.append("Your voice isn't far above the background noise, so the clone may pick up hiss or room sound.")
+    if duration < 5:
+        tips.append("Short clip. 8-12 seconds gives the clone more to learn from.")
+    elif duration > 20:
+        tips.append("Long clip. It was trimmed to the most expressive 6-12 seconds automatically.")
+    score = 100
+    score -= 35 if (clipped > 0.0005 or peak > 0.995) else 0
+    score -= 20 if speech_db < -32 else 0
+    score -= 20 if noise_db > -50 else 0
+    score -= 15 if speech_db - noise_db < 25 else 0
+    score -= 10 if duration < 5 else 0
+    return {
+        "duration_sec": round(duration, 2),
+        "peak_dbfs": round(20 * np.log10(peak + eps), 1),
+        "speech_dbfs": round(speech_db, 1),
+        "noise_floor_dbfs": round(noise_db, 1),
+        "clipping_pct": round(clipped * 100, 3),
+        "score": max(0, score),
+        "tips": tips,
+    }
+
+
+def _profiles_with_clips() -> List[dict]:
+    chars = {c["id"]: c for c in _read_json(CHARACTERS_JSON, [])}
+    out = []
+    for p in _read_json(PROFILES_JSON, []):
+        clips = []
+        for clip in p.get("clips", []):
+            ch = chars.get(clip["character_id"])
+            if ch:  # drop clips whose voice was deleted in the library
+                clips.append({**clip, "name": ch["name"], "url": ch["url"], "ref_text": ch.get("ref_text", "")})
+        out.append({**p, "clips": clips})
+    return out
+
+
+def _save_profile(profile: dict) -> None:
+    profiles = [p for p in _read_json(PROFILES_JSON, []) if p["id"] != profile["id"]]
+    profiles.insert(0, profile)
+    _write_json(PROFILES_JSON, profiles)
+
+
+def _get_profile(profile_id: str) -> dict:
+    p = next((p for p in _read_json(PROFILES_JSON, []) if p["id"] == profile_id), None)
+    if not p:
+        raise HTTPException(status_code=404, detail="Profile not found.")
+    return p
+
+
+class ProfileRequest(BaseModel):
+    name: str = Field(..., description="Person / character name, e.g. 'Tamair'.")
+    description: str = Field("", description="Optional notes about the voice.")
+
+
+class ProfileUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
+class LinkClipRequest(BaseModel):
+    emotion: str = Field(..., description="Emotion slot id, e.g. 'angry'.")
+    character_id: str = Field(..., description="Existing locked voice to use for that emotion.")
+
+
+class PromptRequest(BaseModel):
+    emotion: str = Field(..., description="Emotion slot id.")
+    context: str = Field("", description="Optional: who the character is, so the lines fit them.")
+
+
+@app.get("/clone", response_class=HTMLResponse, include_in_schema=False)
+def clone_page():
+    return (STATIC_DIR / "clone.html").read_text(encoding="utf-8")
+
+
+@app.get("/api/profiles/emotions", tags=["Clone Studio"])
+def api_profile_emotions():
+    """Emotion slots with acting directions and suggested lines to read, plus the direction keywords used to auto-pick clips."""
+    return {"emotions": EMOTIONS, "keywords": EMOTION_KEYWORDS}
+
+
+@app.get("/api/profiles", tags=["Clone Studio"])
+def api_list_profiles():
+    """Character profiles: one person with a cloned reference clip per emotion."""
+    return {"profiles": _profiles_with_clips()}
+
+
+@app.post("/api/profiles", tags=["Clone Studio"])
+def api_create_profile(req: ProfileRequest):
+    if not req.name.strip():
+        raise HTTPException(status_code=400, detail="Name is required.")
+    profile = {
+        "id": f"prof_{int(time.time())}_{uuid.uuid4().hex[:5]}",
+        "name": req.name.strip(),
+        "description": req.description.strip(),
+        "clips": [],
+        "created_at": time.strftime("%Y-%m-%d %H:%M"),
+    }
+    _save_profile(profile)
+    return {"profile": profile, "profiles": _profiles_with_clips()}
+
+
+@app.patch("/api/profiles/{profile_id}", tags=["Clone Studio"])
+def api_update_profile(profile_id: str, req: ProfileUpdateRequest):
+    p = _get_profile(profile_id)
+    if req.name is not None and req.name.strip():
+        p["name"] = req.name.strip()
+    if req.description is not None:
+        p["description"] = req.description.strip()
+    _save_profile(p)
+    return {"profiles": _profiles_with_clips()}
+
+
+@app.delete("/api/profiles/{profile_id}", tags=["Clone Studio"])
+def api_delete_profile(profile_id: str, delete_voices: bool = Query(False, description="Also delete the clip voices from the library.")):
+    p = _get_profile(profile_id)
+    if delete_voices:
+        # Only voices recorded for this profile; voices linked in from the library are left alone
+        owned = {c["id"] for c in _read_json(CHARACTERS_JSON, []) if c.get("profile_id") == profile_id}
+        for clip in p.get("clips", []):
+            if clip["character_id"] in owned:
+                api_delete_character(clip["character_id"])
+    _write_json(PROFILES_JSON, [x for x in _read_json(PROFILES_JSON, []) if x["id"] != profile_id])
+    return {"profiles": _profiles_with_clips()}
+
+
+@app.post("/api/profiles/{profile_id}/clips", tags=["Clone Studio"])
+async def api_add_profile_clip(
+    profile_id: str,
+    emotion: str = Form(..., description="Emotion slot id."),
+    script: str = Form("", description="What the user was asked to read; used as the transcript when Whisper agrees with it."),
+    file: UploadFile = File(..., description="Recording (wav, mp3, m4a, mp4, webm…)."),
+):
+    """Record or upload one emotion for a profile. Cleans it into a 24kHz reference, transcribes it, checks levels and noise."""
+    import difflib
+
+    if emotion not in EMOTION_IDS:
+        raise HTTPException(status_code=400, detail=f"Unknown emotion '{emotion}'.")
+    profile = _get_profile(profile_id)
+    label = next(e["label"] for e in EMOTIONS if e["id"] == emotion)
+
+    ext = Path(file.filename or "rec.webm").suffix or ".webm"
+    temp_path = DATA_DIR / f"upload_{int(time.time())}_{uuid.uuid4().hex[:5]}{ext}"
+    with open(temp_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    try:
+        quality = None
+        try:
+            # Analyse the untrimmed take so tips reflect the whole recording
+            wav_probe = temp_path.with_suffix(".probe.wav")
+            subprocess.run(["ffmpeg", "-y", "-i", str(temp_path), "-ac", "1", "-ar", "24000", str(wav_probe)],
+                           check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            quality = _analyze_recording(wav_probe)
+            wav_probe.unlink(missing_ok=True)
+        except Exception:
+            quality = None
+        char = _ingest_audio_recording(temp_path, name=f"{profile['name']} · {label}", description=f"{profile['name']}, {label.lower()} delivery. {profile.get('description', '')}".strip())
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+    # Prefer the clean script as the transcript when Whisper heard roughly the same words
+    heard = char.get("ref_text", "")
+    match = difflib.SequenceMatcher(None, _norm_words(script), _norm_words(heard)).ratio() if script.strip() else 0.0
+    chars = _read_json(CHARACTERS_JSON, [])
+    stored = next(c for c in chars if c["id"] == char["id"])
+    if script.strip() and match >= 0.75:
+        stored["ref_text"] = script.strip()
+    stored["tags"] = sorted({profile["name"], label.lower(), "profile"}, key=str.lower)
+    stored["profile_id"] = profile_id
+    _write_json(CHARACTERS_JSON, chars)
+
+    profile = _get_profile(profile_id)
+    profile["clips"] = [c for c in profile.get("clips", []) if c["emotion"] != emotion] + [
+        {"emotion": emotion, "character_id": char["id"], "quality": quality, "added_at": time.strftime("%Y-%m-%d %H:%M")}
+    ]
+    _save_profile(profile)
+    return {
+        "character": stored,
+        "heard": heard,
+        "script_match": round(match, 2),
+        "used_script_as_transcript": bool(script.strip() and match >= 0.75),
+        "quality": quality,
+        "profiles": _profiles_with_clips(),
+    }
+
+
+@app.post("/api/profiles/{profile_id}/clips/link", tags=["Clone Studio"])
+def api_link_profile_clip(profile_id: str, req: LinkClipRequest):
+    """Use an existing library voice for one of the profile's emotion slots."""
+    if req.emotion not in EMOTION_IDS:
+        raise HTTPException(status_code=400, detail=f"Unknown emotion '{req.emotion}'.")
+    if not any(c["id"] == req.character_id for c in _read_json(CHARACTERS_JSON, [])):
+        raise HTTPException(status_code=404, detail="Voice not found.")
+    profile = _get_profile(profile_id)
+    profile["clips"] = [c for c in profile.get("clips", []) if c["emotion"] != req.emotion] + [
+        {"emotion": req.emotion, "character_id": req.character_id, "quality": None, "added_at": time.strftime("%Y-%m-%d %H:%M")}
+    ]
+    _save_profile(profile)
+    return {"profiles": _profiles_with_clips()}
+
+
+@app.delete("/api/profiles/{profile_id}/clips/{emotion}", tags=["Clone Studio"])
+def api_unlink_profile_clip(profile_id: str, emotion: str):
+    """Remove an emotion slot from the profile (the voice stays in the library)."""
+    profile = _get_profile(profile_id)
+    profile["clips"] = [c for c in profile.get("clips", []) if c["emotion"] != emotion]
+    _save_profile(profile)
+    return {"profiles": _profiles_with_clips()}
+
+
+@app.get("/api/profiles/{profile_id}/pick", tags=["Clone Studio"])
+def api_pick_profile_clip(profile_id: str, emotion: str = Query("neutral"), direction: str = Query(""), text: str = Query("")):
+    """Which clip a line would use: explicit emotion, else guessed from its acting direction / text."""
+    profile = next((p for p in _profiles_with_clips() if p["id"] == profile_id), None)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found.")
+    emo = emotion if emotion in EMOTION_IDS and emotion != "neutral" else _emotion_from_text(direction, text)
+    return {"emotion": emo, "clip": _pick_profile_clip(profile, emo)}
+
+
+PROMPT_SCHEMA = {
+    "type": "object",
+    "properties": {"script": {"type": "string"}, "how": {"type": "string"}},
+    "required": ["script", "how"],
+}
+
+
+@app.post("/api/profiles/prompts", tags=["Clone Studio"])
+def api_generate_recording_prompt(req: PromptRequest):
+    """Ask Claude for a fresh line to read for an emotion (optionally in a character's voice), with a short acting note."""
+    meta = next((e for e in EMOTIONS if e["id"] == req.emotion), None)
+    if not meta:
+        raise HTTPException(status_code=400, detail=f"Unknown emotion '{req.emotion}'.")
+    system = (
+        "You write short lines for someone to read aloud into a microphone to record a voice-clone reference clip. "
+        "Write 2-3 natural spoken sentences (25-35 words, about 10 seconds), plain words only, no stage directions, "
+        "everyday British English, that make it easy to perform the requested emotion convincingly. "
+        "`how` is one sentence of acting direction for the reader."
+    )
+    prompt = f"Emotion: {meta['label']} ({meta['how']})\n"
+    if req.context.strip():
+        prompt += f"Character / context: {req.context.strip()}\n"
+    try:
+        return _ask_claude(system, prompt, PROMPT_SCHEMA, CLAUDE_EXTRACT_MODEL, timeout=120, effort="low")
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
 
 app.mount("/audio/scenes", StaticFiles(directory=str(SCENES_DIR)), name="scenes")
