@@ -176,11 +176,11 @@ class SynthesizeRequest(BaseModel):
     )
     temperature: Optional[float] = Field(
         None,
-        description="Native model sampling temperature (defaults to 0.75 for Qwen3 Clone, 0.80 for Qwen3 Design, 0.42 for Maya-1).",
+        description="Native model sampling temperature (defaults to 0.50 for Qwen3 Clone, 0.80 for Qwen3 Design, 0.42 for Maya-1).",
     )
     top_p: Optional[float] = Field(
         None,
-        description="Native nucleus sampling top_p (defaults to 0.92 for Qwen3 Clone, 0.95 for Qwen3 Design, 0.88 for Maya-1).",
+        description="Native nucleus sampling top_p (defaults to 0.82 for Qwen3 Clone, 0.95 for Qwen3 Design, 0.88 for Maya-1).",
     )
     repetition_penalty: Optional[float] = Field(
         None,

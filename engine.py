@@ -807,7 +807,7 @@ class Maya1MLXRunner:
         }
 
 
-RVQ_LOCK_LIMITS = {"temperature": 0.65, "top_p": 0.90, "top_k": 40}
+RVQ_LOCK_LIMITS = {"temperature": 0.30, "top_p": 0.75, "top_k": 20}
 
 
 def _install_qwen3_timbre_lock(model: Any) -> None:
@@ -829,8 +829,6 @@ def _install_qwen3_timbre_lock(model: Any) -> None:
         suppress_tokens = kwargs.get("suppress_tokens", None)
         if suppress_tokens is None and getattr(model, "_lock_rvq_timbre", False):
             # Sampling RVQ acoustic timbre codebooks code_1..code_15: clamp entropy!
-            # Near-greedy residual codebooks (the old 0.30 / 0.75 / 20 clamp) strip breath and grit and
-            # give a smoothed, "processed" texture; this milder clamp still keeps timbre stable.
             if "temperature" in kwargs:
                 kwargs["temperature"] = min(float(kwargs["temperature"]), RVQ_LOCK_LIMITS["temperature"])
             if "top_p" in kwargs:
@@ -892,11 +890,10 @@ def _build_rolling_context_reference(
     return mx.array(combined_np, dtype=mx.float32), combined_text, combined_np
 
 
-# Sampling defaults. code_0 (prosody) needs enough entropy to move pitch and timing; at the old clone
-# defaults (0.50 / 0.82) it settled into a narrow, read-aloud contour. 1.5 matches the repetition penalty
-# mlx-audio used to force on ICL, which keeps long chained references from looping.
+# Sampling defaults. 1.5 matches the repetition penalty mlx-audio used to force on ICL, which keeps
+# long chained references from looping. (Warmer clone settings, 0.75 / 0.92, were A/B tested and lost.)
 QWEN_DESIGN_DEFAULTS = {"temperature": 0.80, "top_p": 0.95, "repetition_penalty": 1.05}
-QWEN_CLONE_DEFAULTS = {"temperature": 0.75, "top_p": 0.92, "repetition_penalty": 1.5}
+QWEN_CLONE_DEFAULTS = {"temperature": 0.50, "top_p": 0.82, "repetition_penalty": 1.5}
 
 
 def _split_for_synthesis(text: str, max_chars: int = 220) -> List[str]:
