@@ -883,7 +883,8 @@ QWEN_CLONE_DEFAULTS = {"temperature": 0.58, "top_p": 0.82, "repetition_penalty":
 # Dynamic temperature: emotional lines get up to +0.15 on code_0 (prosody) so they can move further
 # from the reference's contour; calm lines stay at the base value. Timbre codebooks stay clamped.
 MAX_EMOTION_TEMP_BOOST = 0.15
-EMOTION_TEMP_CEILING = {"voice_design": 1.0, "voice_clone": 0.75}
+# The ceiling only caps the boost; an explicitly higher temperature is never lowered.
+EMOTION_TEMP_CEILING = {"voice_design": 1.05, "voice_clone": 0.85}
 _EMOTION_WORDS_RE = re.compile(
     r"\b(no+|please|help|stop|sorry|hate|love|god|damn|scream\w*|run|why|never|kill|dead|die|"
     r"unbelievable|serious|seriously|dare|wow|oh|ha|haha)\b",
@@ -1107,7 +1108,7 @@ class VoiceForgeEngine:
             if info["mode"] == "voice_design":
                 temp = temperature if temperature is not None else QWEN_DESIGN_DEFAULTS["temperature"]
                 temp_boost = _emotion_temperature_boost(text, extracted_tags) if dynamic_temperature else 0.0
-                temp = min(max(temp, temp + temp_boost), EMOTION_TEMP_CEILING["voice_design"]) if temp_boost else temp
+                temp = max(temp, min(temp + temp_boost, EMOTION_TEMP_CEILING["voice_design"])) if temp_boost else temp
                 tp = top_p if top_p is not None else QWEN_DESIGN_DEFAULTS["top_p"]
                 rp = repetition_penalty if repetition_penalty is not None else QWEN_DESIGN_DEFAULTS["repetition_penalty"]
                 self.active_model._lock_rvq_timbre = False
@@ -1130,7 +1131,7 @@ class VoiceForgeEngine:
             elif info["mode"] == "voice_clone":
                 temp = temperature if temperature is not None else QWEN_CLONE_DEFAULTS["temperature"]
                 temp_boost = _emotion_temperature_boost(text, extracted_tags) if dynamic_temperature else 0.0
-                temp = min(max(temp, temp + temp_boost), EMOTION_TEMP_CEILING["voice_clone"]) if temp_boost else temp
+                temp = max(temp, min(temp + temp_boost, EMOTION_TEMP_CEILING["voice_clone"])) if temp_boost else temp
                 tp = top_p if top_p is not None else QWEN_CLONE_DEFAULTS["top_p"]
                 rp = repetition_penalty if repetition_penalty is not None else QWEN_CLONE_DEFAULTS["repetition_penalty"]
                 self.active_model._lock_rvq_timbre = True

@@ -2165,8 +2165,12 @@ class SavedCastRequest(BaseModel):
     temperature: Optional[float] = None
 
 
-class RenameCharacterRequest(BaseModel):
-    name: str = Field(..., description="New display name for the locked character voice.")
+class UpdateCharacterRequest(BaseModel):
+    name: Optional[str] = Field(None, description="New display name for the locked character voice.")
+    description: Optional[str] = Field(None, description="Voice description / notes.")
+    ref_text: Optional[str] = Field(None, description="Exact transcript of the reference clip (fixing a bad auto-transcript improves cloning).")
+    favorite: Optional[bool] = Field(None, description="Pin this voice to the top of lists.")
+    tags: Optional[List[str]] = Field(None, description="Free-form tags, e.g. ['uni sketch', 'irish'].")
 
 
 @app.get("/cast", response_class=HTMLResponse, include_in_schema=False)
@@ -2363,18 +2367,67 @@ def api_check_scene(scene_id: str):
 
 
 @app.patch("/api/characters/{char_id}", tags=["Character Voice Locker"])
-def api_rename_character(char_id: str, req: RenameCharacterRequest):
-    """Rename a locked character voice."""
-    new_name = req.name.strip()
-    if not new_name:
-        raise HTTPException(status_code=400, detail="Name cannot be empty.")
+def api_update_character(char_id: str, req: UpdateCharacterRequest):
+    """Rename a locked voice or edit its description, reference transcript, tags or favourite flag."""
     chars = _read_json(CHARACTERS_JSON, [])
     target = next((c for c in chars if c["id"] == char_id), None)
     if not target:
         raise HTTPException(status_code=404, detail="Character not found.")
-    target["name"] = new_name
+    if req.name is not None:
+        if not req.name.strip():
+            raise HTTPException(status_code=400, detail="Name cannot be empty.")
+        target["name"] = req.name.strip()
+    if req.description is not None:
+        target["description"] = req.description.strip()
+    if req.ref_text is not None:
+        if not req.ref_text.strip():
+            raise HTTPException(status_code=400, detail="Reference transcript cannot be empty.")
+        target["ref_text"] = req.ref_text.strip()
+    if req.favorite is not None:
+        target["favorite"] = req.favorite
+    if req.tags is not None:
+        target["tags"] = sorted({t.strip() for t in req.tags if t.strip()}, key=str.lower)
     _write_json(CHARACTERS_JSON, chars)
     return {"character": target, "characters": chars}
+
+
+@app.get("/api/voices", tags=["Character Voice Locker"])
+def api_list_voices():
+    """Locked voices plus reference clip length and how many saved scene lines use each one (for the voice manager)."""
+    chars = _read_json(CHARACTERS_JSON, [])
+    usage: Dict[str, int] = {}
+    for scene in _read_json(SCENES_JSON, []):
+        for seg in scene.get("segments", []):
+            cid = seg.get("character_id")
+            if cid:
+                usage[cid] = usage.get(cid, 0) + 1
+    voices = []
+    for c in chars:
+        path = CHARACTERS_DIR / c.get("audio_file", "")
+        try:
+            info = sf.info(str(path))
+            duration = round(info.frames / info.samplerate, 2)
+        except Exception:
+            duration = None
+        voices.append({**c, "duration_sec": duration, "scene_lines": usage.get(c["id"], 0), "missing_audio": not path.exists()})
+    return {"voices": voices}
+
+
+@app.post("/api/characters/{char_id}/retranscribe", tags=["Character Voice Locker"])
+def api_retranscribe_character(char_id: str):
+    """Re-run on-device Whisper on a voice's reference clip and return the transcript (not saved until PATCHed)."""
+    char = next((c for c in _read_json(CHARACTERS_JSON, []) if c["id"] == char_id), None)
+    if not char:
+        raise HTTPException(status_code=404, detail="Character not found.")
+    try:
+        return {"ref_text": _transcribe(CHARACTERS_DIR / char["audio_file"])}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
+
+
+@app.get("/voices", response_class=HTMLResponse, include_in_schema=False)
+def voices_page():
+    return (STATIC_DIR / "voices.html").read_text(encoding="utf-8")
 
 
 @app.get("/api/casts", tags=["Casting Desk"])

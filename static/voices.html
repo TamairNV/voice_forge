@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VoiceForge Voice Library</title>
+  <style>
+    :root {
+      --bg-base: #080a0f;
+      --bg-panel: #10141d;
+      --bg-card: #161b28;
+      --bg-card-hover: #1c2233;
+      --bg-input: #0b0e15;
+      --border: #232b3e;
+      --border-light: #2e3852;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --accent-indigo: #6366f1;
+      --accent-violet: #8b5cf6;
+      --accent-emerald: #10b981;
+      --accent-amber: #f59e0b;
+      --accent-rose: #f43f5e;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif;
+      background: radial-gradient(circle at 12% 0%, #161a2e 0%, var(--bg-base) 60%) fixed;
+      color: var(--text-main); font-size: 13px; line-height: 1.45; -webkit-font-smoothing: antialiased;
+    }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-thumb { background: #283147; border-radius: 999px; }
+    header {
+      position: sticky; top: 0; z-index: 40; min-height: 54px; display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; padding: 8px 20px; background: rgba(16, 20, 29, 0.92); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .brand-icon {
+      width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, var(--accent-indigo), var(--accent-violet)); font-weight: 800; font-size: 14px; color: #fff;
+    }
+    .brand-title { font-size: 15px; font-weight: 700; letter-spacing: -0.02em; }
+    .brand-sub { font-size: 11px; color: var(--text-muted); }
+    @media (max-width: 600px) { header { padding: 8px 16px; } .brand-sub { display: none; } }
+
+    main { max-width: 1400px; margin: 0 auto; padding: 16px 20px 110px; display: flex; flex-direction: column; gap: 14px; }
+    @media (max-width: 600px) { main { padding: 12px 16px 110px; } }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
+    input[type=text], input[type=search], textarea, select {
+      background: var(--bg-input); border: 1px solid var(--border); color: var(--text-main); border-radius: 8px; padding: 7px 10px; font: inherit; outline: none;
+    }
+    input:focus, textarea:focus, select:focus { border-color: var(--accent-indigo); }
+    textarea { width: 100%; resize: vertical; line-height: 1.5; font-size: 12px; }
+    #search { flex: 1; min-width: 180px; }
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+    .chip { padding: 5px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-muted); cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; }
+    .chip.active { border-color: var(--accent-indigo); color: #c7d2fe; background: rgba(99, 102, 241, 0.16); }
+    .chip .n { color: var(--text-dim); margin-left: 4px; font-weight: 500; }
+    .check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+    .btn-sm {
+      padding: 5px 10px; border-radius: 6px; font-size: 11.5px; font-weight: 600; border: 1px solid var(--border); background: var(--bg-panel);
+      color: var(--text-main); cursor: pointer; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; text-decoration: none; transition: all 0.14s; font-family: inherit;
+    }
+    .btn-sm:hover { border-color: var(--accent-indigo); background: rgba(99, 102, 241, 0.16); }
+    .btn-sm.emerald { border-color: rgba(16, 185, 129, 0.45); color: #6ee7b7; }
+    .btn-sm.rose { border-color: rgba(244, 63, 94, 0.4); color: #fda4af; }
+    .btn-sm.violet { border-color: rgba(139, 92, 246, 0.5); color: #c4b5fd; }
+    .btn-sm:disabled { opacity: 0.45; cursor: not-allowed; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .dim { color: var(--text-dim); font-size: 11.5px; }
+    .muted { color: var(--text-muted); }
+    .grow { flex: 1; min-width: 0; }
+
+    .bulkbar { display: none; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(99, 102, 241, 0.45); background: rgba(99, 102, 241, 0.1); }
+    .bulkbar.show { display: flex; }
+    .group-title { display: flex; align-items: baseline; gap: 8px; margin: 6px 2px 0; font-size: 13px; font-weight: 700; }
+    .group-title .dim { font-weight: 500; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 10px; }
+    @media (max-width: 420px) { .grid { grid-template-columns: 1fr; } }
+    .voice { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+    .voice.selected { border-color: var(--accent-indigo); box-shadow: 0 0 0 1px var(--accent-indigo) inset; }
+    .voice.fav { border-color: rgba(245, 158, 11, 0.45); }
+    .vhead { display: flex; align-items: center; gap: 6px; min-width: 0; }
+    .star { background: none; border: none; cursor: pointer; font-size: 16px; line-height: 1; color: var(--text-dim); padding: 2px; }
+    .star.on { color: #fbbf24; }
+    .vname { flex: 1; min-width: 0; font-size: 14px; font-weight: 700; color: var(--text-main); font-family: inherit; background: transparent; border: 1px solid transparent; padding: 3px 6px; border-radius: 6px; }
+    .vname:hover { border-color: var(--border); }
+    .badges { display: flex; gap: 5px; flex-wrap: wrap; }
+    .badge { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-muted); white-space: nowrap; }
+    .badge.warn { color: #fcd34d; border-color: rgba(245, 158, 11, 0.45); }
+    .badge.tag { color: #c4b5fd; border-color: rgba(139, 92, 246, 0.4); cursor: pointer; }
+    .badge.ok { color: #6ee7b7; border-color: rgba(16, 185, 129, 0.4); }
+    .vdesc { font-size: 11.5px; color: var(--text-muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .vref { font-size: 11px; color: var(--text-dim); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .edit { display: flex; flex-direction: column; gap: 6px; border-top: 1px dashed var(--border-light); padding-top: 8px; }
+    .edit label { font-size: 11px; color: var(--text-muted); font-weight: 600; }
+    .try { display: flex; gap: 6px; }
+    .try input { flex: 1; min-width: 0; font-size: 12px; padding: 5px 8px; }
+    .empty { padding: 30px; text-align: center; color: var(--text-dim); border: 1px dashed var(--border-light); border-radius: 10px; }
+
+    .now-playing {
+      position: fixed; right: 16px; bottom: 16px; z-index: 90; width: min(380px, calc(100vw - 32px));
+      display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px;
+      background: var(--bg-card); border: 1px solid var(--border-light); box-shadow: 0 8px 30px rgba(0,0,0,0.45);
+      transform: translateY(20px); opacity: 0; pointer-events: none; transition: all 0.18s;
+    }
+    .now-playing.show { transform: translateY(0); opacity: 1; pointer-events: auto; }
+    .np-main { flex: 1; min-width: 0; }
+    .np-label { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .np-track { height: 6px; margin-top: 6px; border-radius: 999px; background: var(--bg-input); cursor: pointer; overflow: hidden; }
+    .np-progress { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent-indigo), var(--accent-violet)); }
+    .toast {
+      position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%) translateY(20px); opacity: 0; pointer-events: none;
+      background: var(--bg-card); border: 1px solid var(--border-light); padding: 9px 14px; border-radius: 10px; transition: all 0.2s; z-index: 99; max-width: 90vw;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .spinner { width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.25); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="brand-icon">VF</div>
+      <div>
+        <div class="brand-title">Voice Library</div>
+        <div class="brand-sub">All your locked voices: listen, rename, tidy up</div>
+      </div>
+    </div>
+    <div class="row">
+      <a class="btn-sm" href="/cast">🎭 Casting Desk</a>
+      <a class="btn-sm" href="/">← Studio</a>
+    </div>
+  </header>
+
+  <main>
+    <div class="toolbar">
+      <input type="search" id="search" placeholder="Search names, descriptions, tags…" oninput="render()" />
+      <select id="sort" onchange="render(); savePrefs()">
+        <option value="name">Name A–Z</option>
+        <option value="newest">Newest first</option>
+        <option value="oldest">Oldest first</option>
+        <option value="used">Most used in scenes</option>
+        <option value="longest">Longest reference clip</option>
+        <option value="source">Source</option>
+      </select>
+      <label class="check"><input type="checkbox" id="groupBy" checked onchange="render(); savePrefs()" /> Group by person</label>
+      <label class="check"><input type="checkbox" id="favFirst" checked onchange="render(); savePrefs()" /> ★ first</label>
+    </div>
+    <div class="row">
+      <div class="chips" id="chips"></div>
+      <span class="grow"></span>
+      <span class="dim" id="stats"></span>
+    </div>
+    <div class="bulkbar" id="bulkbar">
+      <strong id="selCount">0 selected</strong>
+      <button class="btn-sm violet" onclick="bulkTag()">🏷 Add tag</button>
+      <button class="btn-sm" onclick="bulkFavorite(true)">★ Favourite</button>
+      <button class="btn-sm rose" onclick="bulkDelete()">🗑 Delete</button>
+      <span class="grow"></span>
+      <button class="btn-sm" onclick="selectAllVisible()">Select all shown</button>
+      <button class="btn-sm" onclick="clearSelection()">Clear</button>
+    </div>
+    <div id="list"></div>
+  </main>
+
+  <div class="now-playing" id="nowPlaying">
+    <button class="btn-sm" id="npToggle" onclick="player && player.ended ? (player.currentTime = 0, player.play()) : togglePlayback()" title="Pause / resume">⏸</button>
+    <div class="np-main">
+      <div class="row" style="justify-content: space-between; gap: 8px; flex-wrap: nowrap;"><span id="npLabel" class="np-label"></span><span id="npTime" class="dim"></span></div>
+      <div class="np-track" onclick="seekNowPlaying(event)"><div class="np-progress" id="npProgress"></div></div>
+    </div>
+    <button class="btn-sm rose" onclick="stopPlayback()" title="Stop (Esc)">⏹</button>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const TRY_TEMP = 0.68;  // same warmer default as the Casting Desk's Auto
+    const state = { voices: [], filter: 'all', selected: new Set(), open: new Set(), tryText: {} };
+    let player = null, playerUrl = null;
+
+    function $(id) { return document.getElementById(id); }
+    function escapeHtml(str) {
+      return String(str ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    }
+    function toast(msg, ms = 3200) {
+      const t = $('toast'); t.textContent = msg; t.classList.add('show');
+      clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), ms);
+    }
+    async function api(path, opts = {}) {
+      const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+      let data = null;
+      try { data = await res.json(); } catch (e) { /* non-JSON */ }
+      if (!res.ok) throw new Error(data && data.detail ? (typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)) : res.statusText);
+      return data;
+    }
+
+    // ---------------------------------------------------------------- player
+    function play(url, label) {
+      if (player && playerUrl === url && !player.ended) { if (player.paused) player.play(); else player.pause(); return; }
+      stopPlayback();
+      playerUrl = url;
+      player = new Audio(url + (url.includes('?') ? '' : '?t=' + Date.now()));
+      player.dataset.label = label || 'Preview';
+      ['play', 'pause', 'ended', 'timeupdate', 'loadedmetadata'].forEach(ev => player.addEventListener(ev, updateNowPlaying));
+      player.play().catch(e => toast('Could not play: ' + e.message));
+      updateNowPlaying();
+    }
+    function stopPlayback() {
+      if (player) { player.pause(); player.src = ''; }
+      player = null; playerUrl = null; updateNowPlaying();
+    }
+    function togglePlayback() { if (player) { if (player.paused) player.play(); else player.pause(); } }
+    function fmtTime(t) { t = Math.max(0, t || 0); return Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0'); }
+    function updateNowPlaying() {
+      const bar = $('nowPlaying');
+      if (!player) { bar.classList.remove('show'); return; }
+      bar.classList.add('show');
+      $('npToggle').textContent = player.ended ? '↻' : (player.paused ? '▶' : '⏸');
+      $('npLabel').textContent = player.dataset.label;
+      $('npTime').textContent = `${fmtTime(player.currentTime)} / ${fmtTime(player.duration)}`;
+      $('npProgress').style.width = player.duration ? (player.currentTime / player.duration * 100) + '%' : '0%';
+    }
+    function seekNowPlaying(e) {
+      if (!player || !player.duration) return;
+      const r = e.currentTarget.getBoundingClientRect();
+      player.currentTime = (e.clientX - r.left) / r.width * player.duration;
+    }
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && player) stopPlayback(); });
+
+    // ------------------------------------------------------------------ data
+    function person(v) {
+      const first = v.name.trim().split(/[\s(]+/)[0] || v.name;
+      return first.charAt(0).toUpperCase() + first.slice(1);
+    }
+    function source(v) {
+      const s = (v.source_model || '').toLowerCase();
+      if (s.includes('record') || s.includes('clone')) return 'Recording';
+      if (s.includes('maya')) return 'Maya-1';
+      if (s.includes('design') || s.includes('qwen')) return 'Designed';
+      return v.source_model || 'Other';
+    }
+    function problems(v) {
+      const out = [];
+      if (v.missing_audio) out.push('audio file missing');
+      if (v.duration_sec && v.duration_sec > 20) out.push(`${Math.round(v.duration_sec)}s clip (likely a runaway)`);
+      if (v.duration_sec && v.duration_sec < 3) out.push('very short clip');
+      if (state.voices.filter(x => x.name.trim().toLowerCase() === v.name.trim().toLowerCase()).length > 1) out.push('duplicate name');
+      return out;
+    }
+    async function load() {
+      const d = await api('/api/voices');
+      state.voices = d.voices || [];
+      const ids = new Set(state.voices.map(v => v.id));
+      state.selected = new Set([...state.selected].filter(id => ids.has(id)));
+      render();
+    }
+    function byId(id) { return state.voices.find(v => v.id === id); }
+
+    const FILTERS = [
+      ['all', 'All', () => true],
+      ['fav', '★ Favourites', v => v.favorite],
+      ['Designed', 'Designed', v => source(v) === 'Designed'],
+      ['Recording', 'From recordings', v => source(v) === 'Recording'],
+      ['unused', 'Unused', v => !v.scene_lines],
+      ['issues', '⚠ Needs attention', v => problems(v).length > 0],
+    ];
+    function setFilter(f) { state.filter = f; render(); savePrefs(); }
+
+    function visibleVoices() {
+      const q = $('search').value.trim().toLowerCase();
+      const f = (FILTERS.find(x => x[0] === state.filter) || FILTERS[0])[2];
+      let list = state.voices.filter(f).filter(v => !q || [v.name, v.description, v.ref_text, (v.tags || []).join(' '), v.source_model].join(' ').toLowerCase().includes(q));
+      const sort = $('sort').value;
+      const cmp = {
+        name: (a, b) => a.name.localeCompare(b.name),
+        newest: (a, b) => (b.created_at || '').localeCompare(a.created_at || '') || b.id.localeCompare(a.id),
+        oldest: (a, b) => (a.created_at || '').localeCompare(b.created_at || '') || a.id.localeCompare(b.id),
+        used: (a, b) => (b.scene_lines || 0) - (a.scene_lines || 0) || a.name.localeCompare(b.name),
+        longest: (a, b) => (b.duration_sec || 0) - (a.duration_sec || 0),
+        source: (a, b) => source(a).localeCompare(source(b)) || a.name.localeCompare(b.name),
+      }[sort];
+      list.sort((a, b) => ($('favFirst').checked ? (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0) : 0) || cmp(a, b));
+      return list;
+    }
+
+    // ---------------------------------------------------------------- render
+    function render() {
+      $('chips').innerHTML = FILTERS.map(([key, label, fn]) =>
+        `<button class="chip ${state.filter === key ? 'active' : ''}" onclick="setFilter('${key}')">${label}<span class="n">${state.voices.filter(fn).length}</span></button>`).join('');
+      const list = visibleVoices();
+      const people = new Set(state.voices.map(person));
+      $('stats').textContent = `${list.length} of ${state.voices.length} voices · ${people.size} people`;
+      if (!list.length) { $('list').innerHTML = '<div class="empty">No voices match.</div>'; updateBulk(); return; }
+      if ($('groupBy').checked) {
+        const groups = new Map();
+        list.forEach(v => { const p = person(v); if (!groups.has(p)) groups.set(p, []); groups.get(p).push(v); });
+        $('list').innerHTML = [...groups.entries()].map(([p, vs]) => `
+          <div class="group-title">${escapeHtml(p)} <span class="dim">${vs.length} voice${vs.length === 1 ? '' : 's'}</span></div>
+          <div class="grid">${vs.map(card).join('')}</div>`).join('');
+      } else {
+        $('list').innerHTML = `<div class="grid">${list.map(card).join('')}</div>`;
+      }
+      updateBulk();
+    }
+    function card(v) {
+      const probs = problems(v);
+      const open = state.open.has(v.id);
+      const sel = state.selected.has(v.id);
+      return `
+      <div class="voice ${sel ? 'selected' : ''} ${v.favorite ? 'fav' : ''}" id="v_${v.id}">
+        <div class="vhead">
+          <input type="checkbox" ${sel ? 'checked' : ''} onchange="toggleSelect('${v.id}', this.checked)" title="Select" />
+          <button class="star ${v.favorite ? 'on' : ''}" onclick="toggleFavorite('${v.id}')" title="Favourite">${v.favorite ? '★' : '☆'}</button>
+          <input class="vname" value="${escapeHtml(v.name)}" title="Click to rename, Enter to save" onkeydown="if (event.key === 'Enter') this.blur(); if (event.key === 'Escape') { this.value = byId('${v.id}').name; this.blur(); }" onchange="renameVoice('${v.id}', this.value)" />
+          <button class="btn-sm" onclick="play('${v.url}', ${escapeHtml(JSON.stringify(v.name + ' · reference clip'))})" title="Play / pause the reference clip">▶</button>
+        </div>
+        <div class="badges">
+          <span class="badge">${escapeHtml(source(v))}</span>
+          ${v.duration_sec ? `<span class="badge">${v.duration_sec}s clip</span>` : ''}
+          <span class="badge ${v.scene_lines ? 'ok' : ''}">${v.scene_lines ? `used in ${v.scene_lines} scene line${v.scene_lines === 1 ? '' : 's'}` : 'unused'}</span>
+          ${(v.tags || []).map(t => `<span class="badge tag" onclick="$('search').value = ${escapeHtml(JSON.stringify(t))}; render()" title="Show voices with this tag">#${escapeHtml(t)}</span>`).join('')}
+          ${probs.map(p => `<span class="badge warn">⚠ ${escapeHtml(p)}</span>`).join('')}
+        </div>
+        ${v.description ? `<div class="vdesc" title="${escapeHtml(v.description)}">${escapeHtml(v.description)}</div>` : ''}
+        <div class="vref" title="${escapeHtml(v.ref_text || '')}">“${escapeHtml(v.ref_text || '')}”</div>
+        <div class="try">
+          <input type="text" placeholder="Type a line to hear this voice say it…" value="${escapeHtml(state.tryText[v.id] || '')}"
+            oninput="state.tryText['${v.id}'] = this.value" onkeydown="if (event.key === 'Enter') tryLine('${v.id}', this.nextElementSibling)" />
+          <button class="btn-sm" onclick="tryLine('${v.id}', this)" title="Speak it in this voice">🗣 Say</button>
+          <button class="btn-sm" onclick="toggleOpen('${v.id}')">${open ? 'Close' : '✏️ Edit'}</button>
+        </div>
+        ${open ? `
+        <div class="edit">
+          <label>Description</label>
+          <textarea id="desc_${v.id}" rows="3">${escapeHtml(v.description || '')}</textarea>
+          <label>Reference transcript <span class="dim">(must match the clip word for word; fixing it improves cloning)</span></label>
+          <textarea id="ref_${v.id}" rows="2">${escapeHtml(v.ref_text || '')}</textarea>
+          <label>Tags <span class="dim">(comma separated)</span></label>
+          <input type="text" id="tags_${v.id}" value="${escapeHtml((v.tags || []).join(', '))}" placeholder="e.g. uni sketch, irish" />
+          <div class="row">
+            <button class="btn-sm emerald" onclick="saveEdit('${v.id}', this)">💾 Save</button>
+            <button class="btn-sm" onclick="retranscribe('${v.id}', this)" title="Run Whisper on the clip again and put the result in the transcript box">🎧 Re-transcribe</button>
+            <span class="grow"></span>
+            <span class="dim">${escapeHtml(v.created_at || '')}</span>
+            <button class="btn-sm rose" onclick="deleteVoices(['${v.id}'])">🗑 Delete</button>
+          </div>
+        </div>` : ''}
+      </div>`;
+    }
+
+    // --------------------------------------------------------------- actions
+    async function patchVoice(id, body) {
+      const d = await api(`/api/characters/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+      const i = state.voices.findIndex(v => v.id === id);
+      if (i >= 0) state.voices[i] = { ...state.voices[i], ...d.character };
+      return d.character;
+    }
+    async function renameVoice(id, name) {
+      const v = byId(id);
+      if (!name.trim() || name.trim() === v.name) { render(); return; }
+      try { await patchVoice(id, { name: name.trim() }); toast(`Renamed to "${name.trim()}".`); }
+      catch (e) { toast('Rename failed: ' + e.message); }
+      render();
+    }
+    async function toggleFavorite(id) {
+      try { await patchVoice(id, { favorite: !byId(id).favorite }); } catch (e) { toast('Failed: ' + e.message); }
+      render();
+    }
+    function toggleOpen(id) { state.open.has(id) ? state.open.delete(id) : state.open.add(id); render(); }
+    async function saveEdit(id, btn) {
+      btn.disabled = true;
+      try {
+        await patchVoice(id, {
+          description: $('desc_' + id).value,
+          ref_text: $('ref_' + id).value,
+          tags: $('tags_' + id).value.split(',').map(t => t.trim()).filter(Boolean),
+        });
+        state.open.delete(id);
+        toast('Saved.');
+      } catch (e) { toast('Save failed: ' + e.message, 5000); }
+      render();
+    }
+    async function retranscribe(id, btn) {
+      btn.innerHTML = '<span class="spinner"></span> Listening…'; btn.disabled = true;
+      try {
+        const d = await api(`/api/characters/${id}/retranscribe`, { method: 'POST' });
+        $('ref_' + id).value = d.ref_text;
+        toast('New transcript filled in. Check it, then Save.', 4500);
+      } catch (e) { toast(e.message, 5000); }
+      btn.innerHTML = '🎧 Re-transcribe'; btn.disabled = false;
+    }
+    async function tryLine(id, btn) {
+      const text = (state.tryText[id] || '').trim();
+      if (!text) { toast('Type a line first.'); return; }
+      const label = btn.innerHTML;
+      btn.innerHTML = '<span class="spinner"></span>'; btn.disabled = true;
+      try {
+        const d = await api('/api/synthesize', {
+          method: 'POST',
+          body: JSON.stringify({ model_id: 'qwen3_clone', character_id: id, text, temperature: TRY_TEMP }),
+        });
+        play(d.take.url, `${byId(id).name} · "${text.slice(0, 40)}"`);
+      } catch (e) { toast('Failed: ' + e.message, 6000); }
+      btn.innerHTML = label; btn.disabled = false;
+    }
+    async function deleteVoices(ids) {
+      const vs = ids.map(byId).filter(Boolean);
+      const used = vs.filter(v => v.scene_lines);
+      const msg = `Delete ${vs.length === 1 ? `"${vs[0].name}"` : vs.length + ' voices'}? This removes the reference clip for good.` +
+        (used.length ? `\n\n${used.map(v => v.name).join(', ')} ${used.length === 1 ? 'is' : 'are'} used in saved scenes. Those scenes keep their audio, but re-rolling those lines will stop working.` : '');
+      if (!confirm(msg)) return;
+      for (const v of vs) {
+        try { await api(`/api/characters/${v.id}`, { method: 'DELETE' }); state.selected.delete(v.id); }
+        catch (e) { toast(`Could not delete ${v.name}: ${e.message}`); }
+      }
+      toast(`Deleted ${vs.length} voice${vs.length === 1 ? '' : 's'}.`);
+      await load();
+    }
+
+    // ------------------------------------------------------------------ bulk
+    function toggleSelect(id, on) { on ? state.selected.add(id) : state.selected.delete(id); render(); }
+    function selectAllVisible() { visibleVoices().forEach(v => state.selected.add(v.id)); render(); }
+    function clearSelection() { state.selected.clear(); render(); }
+    function updateBulk() {
+      $('bulkbar').classList.toggle('show', state.selected.size > 0);
+      $('selCount').textContent = `${state.selected.size} selected`;
+    }
+    async function bulkTag() {
+      const tag = prompt(`Tag to add to ${state.selected.size} voice(s):`, '');
+      if (!tag || !tag.trim()) return;
+      for (const id of state.selected) {
+        const v = byId(id);
+        await patchVoice(id, { tags: [...(v.tags || []), tag.trim()] }).catch(e => toast(e.message));
+      }
+      toast('Tagged.'); render();
+    }
+    async function bulkFavorite(on) {
+      for (const id of state.selected) await patchVoice(id, { favorite: on }).catch(e => toast(e.message));
+      render();
+    }
+    function bulkDelete() { deleteVoices([...state.selected]); }
+
+    // ----------------------------------------------------------------- prefs
+    function savePrefs() {
+      try { localStorage.setItem('vf_voices_prefs', JSON.stringify({ sort: $('sort').value, group: $('groupBy').checked, fav: $('favFirst').checked, filter: state.filter })); } catch (e) { /* ignore */ }
+    }
+    try {
+      const p = JSON.parse(localStorage.getItem('vf_voices_prefs') || 'null');
+      if (p) { $('sort').value = p.sort || 'name'; $('groupBy').checked = p.group !== false; $('favFirst').checked = p.fav !== false; state.filter = p.filter || 'all'; }
+    } catch (e) { /* ignore */ }
+
+    load().catch(e => { $('list').innerHTML = `<div class="empty">Could not load voices: ${escapeHtml(e.message)}</div>`; });
+  </script>
+</body>
+</html>

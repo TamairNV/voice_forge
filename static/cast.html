@@ -182,6 +182,7 @@
     <div class="header-right">
       <span class="pill" id="claudePill" title="Claude is used to break down scripts and improve voice descriptions"><span class="dot" id="claudeDot"></span><span id="claudeText">Checking Claude…</span></span>
       <span class="pill"><span class="dot" id="ttsDot"></span><span id="ttsText">TTS</span></span>
+      <a class="btn-sm" href="/voices">🗂 Voices</a>
       <a class="btn-sm" href="/">← Studio</a>
     </div>
   </header>
@@ -239,8 +240,8 @@
               <span class="muted" style="font-size: 11px; font-weight: 600;">Temperature <span class="temp-val" id="tempVal">auto</span></span>
               <label class="check"><input type="checkbox" id="tempAuto" checked onchange="syncTemp()" /> Auto</label>
             </div>
-            <input type="range" id="tempSlider" min="0.3" max="1.2" step="0.01" value="0.58" oninput="syncTemp()" disabled />
-            <div class="dim">Auto keeps the defaults (clone 0.58, new voices 0.85, plus the boost on emotional lines). Higher is wilder.</div>
+            <input type="range" id="tempSlider" min="0.3" max="1.2" step="0.01" value="0.68" oninput="syncTemp()" disabled />
+            <div class="dim">Auto: 0.68 for lines, 0.92 for new voices, plus a boost on emotional lines. Untick to set your own. Higher is wilder.</div>
           </div>
           <div>
             <label class="field" style="margin-top: 0;">Gap between lines (ms)</label>
@@ -335,6 +336,7 @@
       player.dataset.label = label || nowPlayingLabel(url);
       ['play', 'pause', 'ended', 'timeupdate', 'loadedmetadata'].forEach(ev => player.addEventListener(ev, updateNowPlaying));
       player.play().catch(e => toast('Could not play: ' + e.message));
+      updateNowPlaying();
     }
     function stopPlayback() {
       if (player) { player.pause(); player.src = ''; }
@@ -372,11 +374,14 @@
     });
     function voiceById(id) { return state.roster.find(c => c.id === id); }
     function castByKey(key) { return state.cast.find(c => c.key === key); }
-    function tempValue() { return $('tempAuto').checked ? null : parseFloat($('tempSlider').value); }
+    // Auto on this page runs a little warmer than the studio defaults (clone 0.58 / design 0.85); the emotion boost still applies on top.
+    const AUTO_TEMP = { clone: 0.68, design: 0.92 };
+    function rawTemp() { return $('tempAuto').checked ? null : parseFloat($('tempSlider').value); }
+    function tempValue(kind = 'clone') { const t = rawTemp(); return t === null ? AUTO_TEMP[kind] : t; }
     function syncTemp() {
       const auto = $('tempAuto').checked;
       $('tempSlider').disabled = auto;
-      $('tempVal').textContent = auto ? 'auto' : parseFloat($('tempSlider').value).toFixed(2);
+      $('tempVal').textContent = auto ? `auto (${AUTO_TEMP.clone})` : parseFloat($('tempSlider').value).toFixed(2);
     }
 
     // Remember which voice each script name was last cast as
@@ -607,7 +612,7 @@
       try {
         const d = await api('/api/characters/design-and-lock', {
           method: 'POST',
-          body: JSON.stringify({ name: c.name, instruct, sample_text: (nv.sample || '').trim() || DEFAULT_SAMPLE, temperature: tempValue() }),
+          body: JSON.stringify({ name: c.name, instruct, sample_text: (nv.sample || '').trim() || DEFAULT_SAMPLE, temperature: tempValue('design') }),
         });
         state.roster = d.characters;
         c.voiceId = d.character.id;
@@ -649,7 +654,7 @@
             method: 'POST',
             body: JSON.stringify({
               model_id: 'qwen3_voicedesign', text: (nv.sample || '').trim() || DEFAULT_SAMPLE, instruct,
-              temperature: tempValue(), seed: Math.floor(Math.random() * 1e9),
+              temperature: tempValue('design'), seed: Math.floor(Math.random() * 1e9),
             }),
           });
           nv.auditions.push(d.take);
@@ -932,7 +937,7 @@
         const edited = $('segText' + index);
         const original = s.segments.find(x => x.index === index);
         if (edited && original && edited.value.trim() && edited.value.trim() !== original.text) body.text = edited.value.trim();
-        const t = tempValue(); if (t !== null) body.temperature = t;
+        body.temperature = tempValue();
         const d = await api(`/api/scenes/${s.id}/reroll-line`, { method: 'POST', body: JSON.stringify(body) });
         state.scene = d.scene || s;
         if (state.qc) {  // this line's check result is stale now
@@ -962,7 +967,7 @@
             title: $('sceneTitle').value,
             mapping: state.cast.map(c => ({ name: c.name, script_name: c.scriptName, key: c.key, voice_id: c.voiceId, description: c.description })),
             lines: state.lines,
-            temperature: tempValue(),
+            temperature: rawTemp(),
           }),
         });
         await loadSaved();
@@ -1039,7 +1044,7 @@ MARK: ...Dav from upstairs?`;
           cast: state.cast.map(c => ({ key: c.key, scriptName: c.scriptName, name: c.name, description: c.description, voiceId: c.voiceId,
             newVoice: { open: c.newVoice.open, description: c.newVoice.description, sample: c.newVoice.sample } })),
           lines: state.lines.map(l => ({ speaker: l.speaker, text: l.text, direction: l.direction, variantId: l.variantId })),
-          temperature: tempValue(),
+          temperature: rawTemp(),
           pause: $('pauseMs').value,
           continuity: $('continuity').checked,
           sceneId: state.scene ? state.scene.id : null,

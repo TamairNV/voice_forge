@@ -76,7 +76,10 @@ Every single feature in VoiceForge Studio is accessible over HTTP JSON or direct
 | `POST` | `/api/cast/improve-description` | Optional: a strong Claude model (default `opus`) rewrites a voice description for emotional range and writes a lively reference line. |
 | `GET` | `/api/cast/claude-status` | Whether the server can reach Claude (`ANTHROPIC_API_KEY`, or a signed-in `claude` CLI). |
 | `GET`/`POST`/`DELETE` | `/api/casts` | List, save or delete saved cast setups (script + name-to-voice mapping). |
-| `PATCH` | `/api/characters/{char_id}` | Rename a locked character voice. |
+| `PATCH` | `/api/characters/{char_id}` | Edit a locked voice: `name`, `description`, `ref_text`, `tags`, `favorite`. |
+| `GET` | `/voices` | **Voice Library** web page: search, sort, group, rename, tag, favourite and delete voices. |
+| `GET` | `/api/voices` | Locked voices plus reference clip length and how many scene lines use each. |
+| `POST` | `/api/characters/{char_id}/retranscribe` | Re-run Whisper on a voice's reference clip (returns the text; save it with PATCH). |
 | `DELETE` | `/api/takes/{take_id}` | Delete a generated take. |
 
 ---
