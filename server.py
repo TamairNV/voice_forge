@@ -35,6 +35,7 @@ from engine import (
     VoiceForgeEngine,
     MODEL_REGISTRY,
     MAYA1_EMOTION_TAGS,
+    analyze_voice_acoustics,
     compile_voice_instruct,
     sanitize_dialogue_for_model,
     optimize_character_prompts,
@@ -799,41 +800,67 @@ def api_save_character_from_take(req: SaveCharacterFromTakeRequest):
 
 
 def _find_optimal_reference_slice(audio_path: Union[str, Path]) -> Tuple[float, float]:
-    """Find a phonetically balanced 6s-12s speech section using silence detection."""
+    """
+    Pick a 6s-12.5s reference window that starts and ends inside natural pauses (so no word is cut in half
+    and the Whisper transcript lines up with the audio), preferring the most intonation-rich window so the
+    cloned voice inherits an expressive delivery rather than the flattest stretch of the recording.
+    """
+    sr = 24000
     try:
-        cmd = ["ffmpeg", "-i", str(audio_path), "-af", "silencedetect=noise=-30dB:d=0.3", "-f", "null", "-"]
-        res = subprocess.run(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-        lines = res.stderr.splitlines()
-
-        silences = []
-        for line in lines:
-            if "silencedetect" in line:
-                m_start = re.search(r"silence_start:\s*([0-9.]+)", line)
-                m_end = re.search(r"silence_end:\s*([0-9.]+)", line)
-                if m_start:
-                    silences.append(("start", float(m_start.group(1))))
-                elif m_end:
-                    silences.append(("end", float(m_end.group(1))))
-
-        cur_speech_start = 0.0
-        speech_chunks = []
-        for event, t in silences:
-            if event == "start":
-                if t > cur_speech_start + 0.5:
-                    speech_chunks.append((cur_speech_start, t))
-            elif event == "end":
-                cur_speech_start = t
-
-        for i in range(len(speech_chunks)):
-            t0 = max(0.0, speech_chunks[i][0] - 0.1)
-            for j in range(i, len(speech_chunks)):
-                t1 = speech_chunks[j][1] + 0.1
-                dur = t1 - t0
-                if 7.0 <= dur <= 12.5:
-                    return t0, t1
+        cmd = ["ffmpeg", "-v", "error", "-i", str(audio_path), "-ac", "1", "-ar", str(sr), "-f", "f32le", "-"]
+        raw = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout
+        audio = np.frombuffer(raw, dtype=np.float32)
     except Exception:
-        pass
-    return 0.5, 10.5
+        return 0.0, 10.0
+    total_sec = audio.shape[0] / sr
+    if total_sec <= 12.5:
+        return 0.0, total_sec
+
+    hop = int(sr * 0.02)
+    n_frames = audio.shape[0] // hop
+    rms = np.sqrt(np.mean(audio[: n_frames * hop].reshape(n_frames, hop) ** 2, axis=1))
+    # Relative threshold so noisy phone recordings (which never reach -30 dBFS) still yield pauses
+    quiet = rms < max(1e-4, float(np.percentile(rms, 20)) * 1.8, float(np.percentile(rms, 90)) * 0.06)
+
+    # Candidate cut points: the middle of every quiet run of >= 200ms, plus the file edges
+    cuts = [0.0]
+    run_start = None
+    for i, q in enumerate(np.append(quiet, False)):
+        if q and run_start is None:
+            run_start = i
+        elif not q and run_start is not None:
+            if i - run_start >= 10:
+                cuts.append((run_start + i) / 2 * 0.02)
+            run_start = None
+    cuts.append(total_sec)
+
+    candidates = []
+    for i, t0 in enumerate(cuts):
+        for t1 in cuts[i + 1:]:
+            dur = t1 - t0
+            if dur > 12.5:
+                break
+            if dur >= 6.0:
+                candidates.append((t0, t1))
+
+    if not candidates:
+        # No usable pauses: end the window on the quietest frame between 9s and 12.5s
+        lo, hi = int(9.0 / 0.02), min(n_frames, int(12.5 / 0.02))
+        end_f = lo + int(np.argmin(rms[lo:hi])) if hi > lo else hi
+        return 0.0, end_f * 0.02
+
+    def _score(win: Tuple[float, float]) -> float:
+        a = audio[int(win[0] * sr): int(win[1] * sr)]
+        span = analyze_voice_acoustics(a, sr).get("pitch_semitone_span", 0.0)
+        # Favour pitch movement, with a mild preference for ~10s windows (enough context for ICL)
+        return float(span) - abs((win[1] - win[0]) - 10.0) * 0.4
+
+    # Keep scoring cheap on long recordings
+    if len(candidates) > 60:
+        step = len(candidates) / 60.0
+        candidates = [candidates[int(k * step)] for k in range(60)]
+    best = max(candidates, key=_score)
+    return round(best[0], 2), round(best[1], 2)
 
 
 def _ingest_audio_recording(
