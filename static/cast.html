@@ -262,6 +262,7 @@
   <div class="toast" id="toast"></div>
 
   <script>
+    const CLONE_PREVIEW_TEXT = "Right, so here's the thing. I wasn't going to say anything, but honestly? I can't keep pretending this is fine.";
     const DEFAULT_SAMPLE = "Keep your eyes sharp. Nothing in this sector is what it seems, and we only get one shot at this.";
     const state = {
       roster: [],          // locked voices from /api/characters
@@ -421,7 +422,10 @@
           ${c.description ? `<div class="script-desc">From the script: ${escapeHtml(c.description)}</div>` : ''}
           <div class="row tight">
             <select class="grow" onchange="pickVoice(${i}, this.value)">${voiceOptions(v ? c.voiceId : (showNew ? '__new__' : ''))}</select>
-            <button class="btn-sm" ${v ? '' : 'disabled'} onclick="play('${v ? v.url : ''}')" title="Play this voice's reference clip">▶ Preview</button>
+            ${v && c.previewUrl
+              ? `<button class="btn-sm" onclick="play('${c.previewUrl}')" title="Play a freshly generated line in the cloned voice">▶ Preview</button>
+                 <button class="btn-sm" onclick="play('${v.url}')" title="Play the original reference clip from your file">▶ Original</button>`
+              : `<button class="btn-sm" ${v ? '' : 'disabled'} onclick="play('${v ? v.url : ''}')" title="Play this voice's reference clip">▶ Preview</button>`}
           </div>
           ${v ? `
           <div class="row tight">
@@ -457,7 +461,7 @@
     function pickVoice(i, value) {
       const c = state.cast[i];
       if (value === '__new__') { c.newVoice.open = true; c.voiceId = ''; }
-      else { c.voiceId = value; c.newVoice.open = !value; if (value) rememberVoice(c.scriptName, value); }
+      else { c.voiceId = value; c.previewUrl = ''; c.newVoice.open = !value; if (value) rememberVoice(c.scriptName, value); }
       renderAll();
     }
     function renameCast(i, value) {
@@ -567,10 +571,12 @@
       if (!file) return;
       const c = state.cast[i];
       const nv = c.newVoice;
-      const transcript = prompt(`Cloning ${c.name} from "${file.name}".\n\nOptional: type exactly what is said in the clip (more accurate than auto-transcribe). Leave blank to auto-transcribe.`, '');
+      const voiceName = prompt(`Name for the voice cloned from "${file.name}":`, c.name);
+      if (voiceName === null || !voiceName.trim()) { input.value = ''; return; }
+      const transcript = prompt(`Optional: type exactly what is said in the clip (more accurate than auto-transcribe). Leave blank to auto-transcribe.`, '');
       if (transcript === null) { input.value = ''; return; }
       const form = new FormData();
-      form.append('name', c.name);
+      form.append('name', voiceName.trim());
       form.append('description', (nv.description || '').trim() || `Cloned from ${file.name}`);
       if (transcript.trim()) form.append('ref_text', transcript.trim());
       form.append('file', file);
@@ -584,10 +590,26 @@
         c.voiceId = d.character.id;
         nv.open = false; nv.notes = ''; nv.prev = null; nv.auditions = [];
         rememberVoice(c.scriptName, c.voiceId);
-        play(d.character.url);
-        toast(`Cloned "${d.character.name}" from ${file.name}. Heard: "${(d.character.ref_text || '').slice(0, 80)}"`, 6000);
+        toast(`Cloned "${d.character.name}". Generating a preview line…`, 60000);
+        // Preview with new speech in the cloned voice, not a playback of the uploaded clip
+        const firstLine = linesFor(c.key)[0];
+        const previewText = firstLine && firstLine.text.trim().length > 12 ? firstLine.text.trim() : CLONE_PREVIEW_TEXT;
+        setTts(true, 'Previewing ' + d.character.name);
+        let p;
+        try {
+          p = await api('/api/synthesize', {
+            method: 'POST',
+            body: JSON.stringify({ model_id: 'qwen3_clone', character_id: d.character.id, text: previewText, temperature: tempValue() }),
+          });
+        } catch (e) {
+          toast(`Cloned "${d.character.name}", but the preview line failed: ${e.message}`, 7000);
+          return;
+        }
+        c.previewUrl = p.take.url;
+        play(c.previewUrl);
+        toast(`Cloned "${d.character.name}" and playing a fresh preview. ▶ Original plays your file (heard: "${(d.character.ref_text || '').slice(0, 60)}").`, 7000);
       } catch (e) { toast('Clone failed: ' + e.message, 6000); }
-      nv.busy = false; setTts(false); renderAll();
+      finally { nv.busy = false; setTts(false); renderAll(); }
     }
     async function lockAudition(i, k, btn) {
       const c = state.cast[i];
