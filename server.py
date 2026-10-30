@@ -13,6 +13,7 @@ and external LLMs / AI agents / game engines can control every feature programma
 
 import io
 import json
+import random
 import re
 import shutil
 import subprocess
@@ -1721,7 +1722,9 @@ def api_reroll_scene_line(scene_id: str, req: RerollSceneLineRequest):
         temperature=req.temperature,
         top_p=req.top_p,
         repetition_penalty=req.repetition_penalty,
-        seed=req.seed,
+        # Clone mode otherwise derives a fixed per-character seed, so a re-roll without a seed would
+        # sample the exact same take again.
+        seed=req.seed if req.seed is not None else random.randint(1, 2**31 - 1),
         prev_take_id=prev_take_id,
     )
     new_take = _run_synthesis_and_save(synth_req)
