@@ -47,6 +47,10 @@ chmod +x setup.sh start_studio.sh
 
 Every single feature in VoiceForge Studio is accessible over HTTP JSON or direct binary `.wav` streaming.
 
+**Agents start at [`AGENTS.md`](AGENTS.md).** `voiceforge_mcp.py` turns every endpoint into a tool, as an MCP server
+(`claude mcp add voiceforge -- python3 /Users/tamair/voice_forge/voiceforge_mcp.py`) or a CLI
+(`python3 voiceforge_mcp.py list | describe <tool> | call <tool> '<json>'`). `GET /api/capabilities` lists every endpoint live.
+
 ### Quick Summary of Endpoints
 
 | Method | Endpoint | Description |
@@ -86,6 +90,15 @@ Every single feature in VoiceForge Studio is accessible over HTTP JSON or direct
 | `GET` | `/api/voices` | Locked voices plus reference clip length and how many scene lines use each. |
 | `POST` | `/api/characters/{char_id}/retranscribe` | Re-run Whisper on a voice's reference clip (returns the text; save it with PATCH). |
 | `DELETE` | `/api/takes/{take_id}` | Delete a generated take. |
+| `POST` | `/api/cast/produce` | **Casting Desk in one call**: script in, cast (voices / profiles / new voices), emotion clips picked per line, scene rendered. `dry_run` returns the render payload. |
+| `POST` | `/api/casts/{id or name}/render` | Re-render a saved cast with its voices, profiles, variants and blends. |
+| `POST` | `/api/scenes/{scene_id}/check` | Whisper-check every rendered line against the script; returns `flagged` lines. |
+| `POST` | `/api/scenes/{scene_id}/use-take` | Switch a line to another of its takes (`candidates`) and re-stitch. |
+| `POST` | `/api/profiles/{id}/clips/from-path` | Add an emotion clip from a local file path (JSON, no upload). |
+| `POST`/`DELETE` | `/api/profiles/{id}/clips/link`, `/api/profiles/{id}/clips/{emotion}` | Use a library voice for an emotion slot, or clear a slot. |
+| `PATCH`/`DELETE` | `/api/profiles/{id}` | Rename / delete a profile (`?delete_voices=true` also removes its recorded voices). |
+| `POST` | `/api/profiles/{id}/repair`, `/api/profiles/prompts` | Fix quiet starts on a profile's clips; ask Claude for a fresh line to record. |
+| `GET` | `/api/capabilities` | Every endpoint grouped by area, generated live from the routes. |
 
 ---
 

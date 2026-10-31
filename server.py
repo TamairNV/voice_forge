@@ -346,6 +346,14 @@ class SceneLineItem(BaseModel):
         "subtle",
         description="'subtle' keeps this voice's emotion in front (blend clip heard first); 'strong' lets the blend clip lead (heard last, which pulls hardest).",
     )
+    emotion: Optional[str] = Field(
+        None,
+        description="Emotion slot id for this line (see GET /api/profiles/emotions, e.g. 'angry', 'sad', 'whispering'). When the speaker is a Clone Studio profile, picks that emotion's clip (or its closest stand-in).",
+    )
+    direction: Optional[str] = Field(
+        None,
+        description="Short acting direction, e.g. 'panicking', 'whispers', 'cuts in'. For profile speakers it picks the emotion clip when `emotion` is omitted; 'interrupts' / 'cuts in' overlaps this line onto the previous one.",
+    )
 
 
 class RerollSceneLineRequest(BaseModel):
@@ -446,6 +454,14 @@ class SceneRenderRequest(BaseModel):
         le=4,
         description="Generate this many takes of every cloned line and keep the best (Whisper word match, plausible length, pitch close to the voice). Costs N x render time.",
     )
+    use_profiles: bool = Field(
+        True,
+        description=(
+            "Clone Studio profiles: a speaker cast as `{'profile': 'Tamair'}` / `{'profile_id': 'prof_...'}`, or named exactly like a "
+            "profile (with no locked voice of that exact name), gets the profile's emotion clip picked per line from `emotion`, "
+            "`direction` or the text (ALL CAPS = shouting), exactly like the Casting Desk does."
+        ),
+    )
 
 
 class BatchSceneRenderRequest(BaseModel):
@@ -507,6 +523,31 @@ def api_llm_guide():
             "Torvin [1.25x]: Not for all the gold in the Citadel!",
             "Nyx [maya1, 1.20x]: <laugh> Fine, keep the sword. I only came for the map.",
         ],
+    }
+
+
+@app.get("/api/capabilities", tags=["System & Discovery"])
+def api_capabilities():
+    """
+    Every API operation the studio offers, grouped by area (method, path, one-line summary), built live from the routes
+    so it never goes stale. Everything the web pages (/, /cast, /voices, /clone) do goes through these endpoints.
+    Full request/response schemas: GET /openapi.json. Workflows and prompting rules: GET /api/llm-guide.
+    Also usable as an MCP server: `python voiceforge_mcp.py` (see AGENTS.md).
+    """
+    from fastapi.routing import APIRoute
+
+    groups: Dict[str, list] = {}
+    for r in app.routes:
+        if not isinstance(r, APIRoute) or not r.include_in_schema:
+            continue
+        doc = (r.description or r.summary or r.name or "").strip()
+        first = " ".join(doc.split("\n\n")[0].split())
+        for method in sorted(r.methods - {"HEAD", "OPTIONS"}):
+            groups.setdefault((r.tags or ["Other"])[0], []).append({"method": method, "path": r.path, "summary": first})
+    return {
+        "docs": {"openapi": "/openapi.json", "swagger_ui": "/docs", "llm_guide": "/api/llm-guide", "agents_md": "AGENTS.md"},
+        "pages": {"/": "Studio (design, synthesize, scenes)", "/cast": "Casting Desk", "/voices": "Voice Library", "/clone": "Clone Studio"},
+        "groups": groups,
     }
 
 
@@ -1657,6 +1698,8 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
             status_code=400,
             detail="Provide either `lines` (list of speaker+text turns) or `script_text` formatted as `Speaker (optional voice desc): Dialogue`.",
         )
+    lines, expanded_cast = _apply_directions_and_profiles(lines, dict(req.cast or {}), req.use_profiles)
+    req.cast = expanded_cast
 
     # Normalize cast lookup (case-insensitive)
     cast_descriptions: Dict[str, str] = {}
@@ -2855,9 +2898,169 @@ def api_save_cast(req: SavedCastRequest):
 
 @app.delete("/api/casts/{cast_id}", tags=["Casting Desk"])
 def api_delete_cast(cast_id: str):
+    """Delete a saved cast setup."""
     casts = [c for c in _read_json(CASTS_JSON, []) if c["id"] != cast_id]
     _write_json(CASTS_JSON, casts)
     return {"casts": casts}
+
+
+def _variant_label(name: str, voice: Optional[dict]) -> str:
+    """'Phoebe Panicked' used on Phoebe's line reads as 'Phoebe (Panicked)', like the Casting Desk labels it."""
+    label = voice["name"] if voice else "variant"
+    if label.lower().startswith(name.lower() + " "):
+        label = re.sub(r"^[\s·(\-]+|\)$", "", label[len(name):])
+    return f"{name} ({label or 'variant'})"
+
+
+class SceneRenderOptions(BaseModel):
+    title: Optional[str] = Field(None, description="Scene title (defaults to the extracted / saved title).")
+    temperature: Optional[float] = Field(None, description="Scene-wide clone temperature (studio default 0.95).")
+    takes_per_line: int = Field(1, ge=1, le=4, description="Best-of-N takes per cloned line.")
+    default_pause_ms: int = Field(280, ge=-2000, le=5000, description="Base gap between lines.")
+    natural_pacing: bool = Field(True, description="Vary gaps by punctuation / emotion like the Casting Desk.")
+    context_continuity: bool = Field(True, description="Chain each line from the previous one's audio.")
+    dry_run: bool = Field(False, description="Return the built POST /api/scenes/render payload without rendering, so you can inspect or edit it.")
+
+
+class CastProduceRequest(SceneRenderOptions):
+    """Casting Desk in one call: script in, rendered scene out."""
+    script: str = Field(..., description="A sketch, screenplay, story notes, or `Name: line` dialogue.")
+    voices: Dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Optional casting per character name: a locked voice id or name, 'profile:<profile id or name>' for a Clone Studio "
+            "profile (emotion clip auto-picked per line), or a plain-English description to design a brand-new voice. "
+            "Anyone not listed uses a profile with the same name, then the suggested library voice, then a new voice from the extracted description."
+        ),
+    )
+    use_claude: bool = Field(True, description="Use Claude to read the script (False = built-in `Name: line` parser).")
+    improve_new_voices: bool = Field(False, description="Run each new voice description through POST /api/cast/improve-description first (Claude, slower).")
+
+
+def _cast_entry(name: str, choice: str, fallback_description: str = "") -> Any:
+    choice = (choice or "").strip()
+    if choice.lower().startswith("profile:"):
+        return {"profile": choice.split(":", 1)[1].strip()}
+    if choice:
+        char = _resolve_character(choice)
+        if char:
+            return {"character_id": char["id"]}
+        if _find_profile(choice):
+            return {"profile": choice}
+        return choice  # a description: designed and locked during render
+    if _find_profile(name):
+        return {"profile": name}
+    return fallback_description or f"Natural, expressive voice for {name}, conversational pacing."
+
+
+def _scene_payload(title: str, cast: Dict[str, Any], lines: List[dict], opts: SceneRenderOptions, temperature: Optional[float] = None) -> dict:
+    return {
+        "title": opts.title or title or "Untitled Scene",
+        "cast": cast,
+        "lines": lines,
+        "default_pause_ms": opts.default_pause_ms,
+        "temperature": opts.temperature if opts.temperature is not None else temperature,
+        "context_continuity": opts.context_continuity,
+        "natural_pacing": opts.natural_pacing,
+        "takes_per_line": opts.takes_per_line,
+    }
+
+
+def _render_payload(payload: dict) -> dict:
+    scene = _execute_scene_render(SceneRenderRequest(**payload))
+    return {"scene": scene, "characters": _read_json(CHARACTERS_JSON, []), "status": engine.get_status()}
+
+
+@app.post("/api/cast/produce", tags=["Casting Desk"])
+def api_cast_produce(req: CastProduceRequest):
+    """
+    The whole Casting Desk flow in one call, for agents: read the script (Claude or the parser), cast every character
+    (your `voices`, else a same-named Clone Studio profile, else the suggested library voice, else a new voice designed from
+    the extracted description), pick emotion clips per line for profiles, apply interrupts and shouted-line resets, then render.
+    Use `dry_run` to get the scene payload back first.
+    """
+    extracted = api_cast_extract(CastExtractRequest(script=req.script, use_claude=req.use_claude))
+    voices_lc = {k.strip().lower(): v for k, v in req.voices.items()}
+    cast: Dict[str, Any] = {}
+    for c in extracted["characters"]:
+        name = c["name"]
+        choice = voices_lc.get(name.lower(), "") or (c["suggested_voice_id"] if not _find_profile(name) else "")
+        desc = c.get("description", "")
+        entry = _cast_entry(name, choice, desc)
+        if isinstance(entry, str) and req.improve_new_voices:
+            their_lines = [l["text"] for l in extracted["lines"] if l["speaker"].lower() == name.lower()]
+            try:
+                entry = api_cast_improve_description(CastImproveRequest(name=name, description=entry, lines=their_lines))["description"] or entry
+            except HTTPException:
+                pass
+        cast[name] = entry
+    lines = []
+    for l in extracted["lines"]:
+        item = {"speaker": l["speaker"], "text": l["text"], "direction": l.get("direction") or None, "emotion": l.get("emotion") or None}
+        variant = l.get("variant_voice_id")
+        if variant:
+            label = _variant_label(l["speaker"], _resolve_character(variant))
+            cast[label] = {"character_id": variant}
+            item["speaker"] = label
+        if l.get("emotion") == "shouting":
+            item["context_reset"] = True
+        lines.append(item)
+    payload = _scene_payload(extracted["title"], cast, lines, req)
+    result = {"extracted": extracted, "scene_request": payload}
+    if req.dry_run:
+        return result
+    return {**result, **_render_payload(payload)}
+
+
+@app.post("/api/casts/{cast_id}/render", tags=["Casting Desk"])
+def api_render_saved_cast(cast_id: str, req: SceneRenderOptions = SceneRenderOptions()):
+    """Re-render a saved cast (from POST /api/casts or the Casting Desk's Save button) with its voices, profiles, variants and blends."""
+    saved = next((c for c in _read_json(CASTS_JSON, []) if c["id"] == cast_id or c["name"].lower() == cast_id.lower()), None)
+    if not saved:
+        raise HTTPException(status_code=404, detail=f"Saved cast '{cast_id}' not found.")
+    by_key: Dict[str, dict] = {}
+    cast: Dict[str, Any] = {}
+    for m in saved.get("mapping", []):
+        name = m.get("name") or m.get("script_name") or m.get("key")
+        if not name:
+            continue
+        by_key[(m.get("key") or name).lower()] = m
+        by_key.setdefault(name.lower(), m)
+        if m.get("profile_id") and _find_profile(m["profile_id"]):
+            cast[name] = {"profile_id": m["profile_id"]}
+        elif m.get("voice_id") and _resolve_character(m["voice_id"]):
+            cast[name] = {"character_id": m["voice_id"]}
+        else:
+            cast[name] = m.get("description") or f"Natural, expressive voice for {name}."
+    lines = []
+    for l in saved.get("lines", []):
+        text = str(l.get("text", "")).strip()
+        m = by_key.get(str(l.get("speaker", "")).lower())
+        if not text or not m:
+            continue
+        name = m.get("name") or m.get("key")
+        item: Dict[str, Any] = {"speaker": name, "text": text, "direction": l.get("direction") or None,
+                                "emotion": l.get("profileEmotion") or l.get("emotion") or None}
+        variant = l.get("variantId") or l.get("variant_voice_id")
+        # On a profile speaker only a hand-picked variant overrides the per-line emotion clip
+        if variant and (l.get("variantManual") or not m.get("profile_id")) and _resolve_character(variant):
+            label = _variant_label(name, _resolve_character(variant))
+            cast[label] = {"character_id": variant}
+            item["speaker"] = label
+        if l.get("hitHard") is not None:
+            item["context_reset"] = bool(l["hitHard"])
+        elif (item["emotion"] or "") == "shouting":
+            item["context_reset"] = True
+        if l.get("blendId"):
+            item["blend_with"] = l["blendId"]
+            item["blend_strength"] = l.get("blendStrength") or "subtle"
+        lines.append(item)
+    if not lines:
+        raise HTTPException(status_code=422, detail="That saved cast has no lines to render.")
+    payload = _scene_payload(saved.get("title") or saved["name"], cast, lines, req, temperature=saved.get("temperature"))
+    if req.dry_run:
+        return {"scene_request": payload}
+    return {"scene_request": payload, **_render_payload(payload)}
 
 
 # ============================================================================
@@ -3080,6 +3283,82 @@ def _get_profile(profile_id: str) -> dict:
     return p
 
 
+INTERRUPT_RE = re.compile(r"interrupt|cuts? in|cutting in|cutting (him|her|them) off", re.I)
+
+
+def _find_profile(ref: str) -> Optional[dict]:
+    """Profile by id or (case-insensitive) name, with its clips resolved; None if it has no clips."""
+    target = (ref or "").strip().lower()
+    if not target:
+        return None
+    for p in _profiles_with_clips():
+        if p["id"].lower() == target or p["name"].strip().lower() == target:
+            return p if p.get("clips") else None
+    return None
+
+
+def _apply_directions_and_profiles(lines: List[SceneLineItem], cast: Dict[str, Any], use_profiles: bool = True):
+    """
+    Server-side version of what the Casting Desk does in the browser before rendering:
+      - a speaker that is a Clone Studio profile gets one clip per line, picked from the line's emotion / direction / text,
+        relabelled "Name (Emotion)" (which also drives whisper/shout loudness) and chained as one continuity group;
+      - shouted profile lines start fresh (context_reset) unless the caller set it;
+      - a direction like "interrupts" / "cuts in" overlaps the line onto the previous one (unless that line set a pause).
+    Returns (new_lines, new_cast).
+    """
+    cast_lc = {k.strip().lower(): (k, v) for k, v in cast.items()}
+    exact_names = {c["name"].strip().lower() for c in _read_json(CHARACTERS_JSON, [])}
+    profile_for: Dict[str, Optional[dict]] = {}
+
+    def profile_of(speaker: str) -> Optional[dict]:
+        key = speaker.strip().lower()
+        if key in profile_for:
+            return profile_for[key]
+        found = None
+        if use_profiles:
+            entry = cast_lc.get(key)
+            val = entry[1] if entry else None
+            if isinstance(val, dict) and (val.get("profile_id") or val.get("profile")):
+                ref = str(val.get("profile_id") or val.get("profile"))
+                found = _find_profile(ref)
+                if not found:
+                    raise HTTPException(status_code=404, detail=f"Profile '{ref}' for {speaker} not found (or it has no clips yet).")
+            elif entry is None and key not in exact_names:
+                found = _find_profile(speaker)
+        profile_for[key] = found
+        return found
+
+    labels = {e["id"]: e["label"] for e in EMOTIONS}
+    out: List[SceneLineItem] = []
+    for line in lines:
+        line = line.model_copy(deep=True)
+        direction = (line.direction or "").strip()
+        if not direction and line.instruct and not _is_voice_description(line.instruct):
+            direction = line.instruct.strip()  # "Tamair (panicking): ..." in script_text
+        prof = profile_of(line.speaker)
+        if prof:
+            emo = (line.emotion or "").strip().lower()
+            if emo not in EMOTION_IDS:
+                emo = _emotion_from_text(direction, line.text)
+            clip = _pick_profile_clip(prof, emo)
+            label = f"{prof['name']} ({labels.get(clip['emotion'], clip['emotion'])})"
+            cast[label] = {"character_id": clip["character_id"]}
+            line.speaker = label
+            line.instruct = None
+            line.direction = direction or None
+            line.continuity_group = line.continuity_group or prof["name"]
+            if "context_reset" not in line.model_fields_set and clip["emotion"] == "shouting":
+                line.context_reset = True
+        if out and direction and INTERRUPT_RE.search(direction) and out[-1].pause_after_ms is None:
+            out[-1].pause_after_ms = -220
+        out.append(line)
+    # Drop cast entries that only pointed at a profile; the per-line labels replace them
+    for key, (orig, val) in cast_lc.items():
+        if isinstance(val, dict) and (val.get("profile_id") or val.get("profile")) and profile_for.get(key):
+            cast.pop(orig, None)
+    return out, cast
+
+
 class ProfileRequest(BaseModel):
     name: str = Field(..., description="Person / character name, e.g. 'Tamair'.")
     description: str = Field("", description="Optional notes about the voice.")
@@ -3119,6 +3398,7 @@ def api_list_profiles():
 
 @app.post("/api/profiles", tags=["Clone Studio"])
 def api_create_profile(req: ProfileRequest):
+    """Create an empty Clone Studio profile for a person; then add clips per emotion (upload, from-path, or link a library voice)."""
     if not req.name.strip():
         raise HTTPException(status_code=400, detail="Name is required.")
     profile = {
@@ -3134,6 +3414,7 @@ def api_create_profile(req: ProfileRequest):
 
 @app.patch("/api/profiles/{profile_id}", tags=["Clone Studio"])
 def api_update_profile(profile_id: str, req: ProfileUpdateRequest):
+    """Rename a profile or edit its description."""
     p = _get_profile(profile_id)
     if req.name is not None and req.name.strip():
         p["name"] = req.name.strip()
@@ -3145,6 +3426,7 @@ def api_update_profile(profile_id: str, req: ProfileUpdateRequest):
 
 @app.delete("/api/profiles/{profile_id}", tags=["Clone Studio"])
 def api_delete_profile(profile_id: str, delete_voices: bool = Query(False, description="Also delete the clip voices from the library.")):
+    """Delete a profile. With delete_voices=true, also delete the voices recorded for it (linked library voices are kept)."""
     p = _get_profile(profile_id)
     if delete_voices:
         # Only voices recorded for this profile; voices linked in from the library are left alone
@@ -3165,36 +3447,64 @@ async def api_add_profile_clip(
     file: UploadFile = File(..., description="Recording (wav, mp3, m4a, mp4, webm…)."),
 ):
     """Record or upload one emotion for a profile. Cleans it into a 24kHz reference, transcribes it, checks levels and noise."""
-    import difflib
-
     if emotion not in EMOTION_IDS:
         raise HTTPException(status_code=400, detail=f"Unknown emotion '{emotion}'.")
-    profile = _get_profile(profile_id)
-    label = next(e["label"] for e in EMOTIONS if e["id"] == emotion)
-
+    _get_profile(profile_id)
     ext = Path(file.filename or "rec.webm").suffix or ".webm"
     temp_path = DATA_DIR / f"upload_{int(time.time())}_{uuid.uuid4().hex[:5]}{ext}"
     with open(temp_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
     try:
-        quality = None
-        try:
-            # Analyse the untrimmed take so tips reflect the whole recording
-            wav_probe = temp_path.with_suffix(".probe.wav")
-            subprocess.run(["ffmpeg", "-y", "-i", str(temp_path), "-ac", "1", "-ar", "24000", str(wav_probe)],
-                           check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            quality = _analyze_recording(wav_probe)
-            wav_probe.unlink(missing_ok=True)
-        except Exception:
-            quality = None
-        char = _ingest_audio_recording(
-            temp_path,
-            name=f"{profile['name']} · {label}",
-            description=f"{profile['name']}, {label.lower()} delivery. {profile.get('description', '')}".strip(),
-            repair_gain_ramp=(source == "browser"),
-        )
+        return _add_profile_clip(profile_id, emotion, temp_path, script=script, repair_gain_ramp=(source == "browser"))
     finally:
         temp_path.unlink(missing_ok=True)
+
+
+class ProfileClipFromPathRequest(BaseModel):
+    emotion: str = Field(..., description="Emotion slot id (see GET /api/profiles/emotions).")
+    audio_path: str = Field(..., description="Absolute path on the studio machine to a recording (wav, mp3, m4a, mp4, webm…).")
+    script: str = Field("", description="Optional: what is said in the clip. Used as the transcript when Whisper roughly agrees.")
+
+
+@app.post("/api/profiles/{profile_id}/clips/from-path", tags=["Clone Studio"])
+def api_add_profile_clip_from_path(profile_id: str, req: ProfileClipFromPathRequest):
+    """Same as the multipart clip upload, but takes a local file path (handy for agents running on the studio machine)."""
+    if req.emotion not in EMOTION_IDS:
+        raise HTTPException(status_code=400, detail=f"Unknown emotion '{req.emotion}'.")
+    _get_profile(profile_id)
+    src = Path(req.audio_path).expanduser()
+    if not src.is_file():
+        raise HTTPException(status_code=404, detail=f"Audio file not found: {src}")
+    # Work on a copy so the caller's file is never touched
+    temp_path = DATA_DIR / f"upload_{int(time.time())}_{uuid.uuid4().hex[:5]}{src.suffix or '.wav'}"
+    shutil.copyfile(src, temp_path)
+    try:
+        return _add_profile_clip(profile_id, req.emotion, temp_path, script=req.script)
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def _add_profile_clip(profile_id: str, emotion: str, temp_path: Path, script: str = "", repair_gain_ramp: bool = False) -> dict:
+    import difflib
+
+    profile = _get_profile(profile_id)
+    label = next(e["label"] for e in EMOTIONS if e["id"] == emotion)
+    quality = None
+    try:
+        # Analyse the untrimmed take so tips reflect the whole recording
+        wav_probe = temp_path.with_suffix(".probe.wav")
+        subprocess.run(["ffmpeg", "-y", "-i", str(temp_path), "-ac", "1", "-ar", "24000", str(wav_probe)],
+                       check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        quality = _analyze_recording(wav_probe)
+        wav_probe.unlink(missing_ok=True)
+    except Exception:
+        quality = None
+    char = _ingest_audio_recording(
+        temp_path,
+        name=f"{profile['name']} · {label}",
+        description=f"{profile['name']}, {label.lower()} delivery. {profile.get('description', '')}".strip(),
+        repair_gain_ramp=repair_gain_ramp,
+    )
 
     # Prefer the clean script as the transcript when Whisper heard roughly the same words
     heard = char.get("ref_text", "")

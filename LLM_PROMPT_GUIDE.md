@@ -77,6 +77,7 @@ To generate a complete multi-character game skit in a single call, send `POST ht
   - `Speaker (voice description for new character) [temp 0.45, top_p 0.80, seed 42, overlap 200ms]: Dialogue text`
   - `Speaker [ref: /path/to/audio.wav]: Dialogue text using cloned voice from recording`
   - `Speaker [blend: Speaker (Sad)]: Dialogue` — emotion blend: joins a second clip of the same person onto the voice's reference so the read lands between the two emotions. Add `strong` (`[blend: Speaker (Sad) strong]`) to let the blend clip lead. Also `blend_with` / `blend_strength` on `lines` and `/api/synthesize`.
+  - `Speaker (furious): Dialogue` — a short parenthetical is an acting direction. If `Speaker` is a Clone Studio profile (or cast as `{"profile": "Name"}`), each line automatically uses that person's closest emotion clip (from `emotion`, the direction, or ALL-CAPS text = shouting). A direction like `(cuts in)` / `(interrupts)` overlaps the line onto the previous one.
   - Standalone timing lines between turns:
     - `[Pause: 450ms]` or `[pause 1.5s]` — adds a dramatic silence beat after the previous line.
     - `[Overlap: 220ms]` — makes the next speaker interrupt 220ms *before* the previous line finishes!
@@ -105,4 +106,11 @@ To generate a complete multi-character game skit in a single call, send `POST ht
 - `POST /api/scenes/{scene_id}/reroll-line` — `{ "line_index": 2, "text": "...", "speed": 1.25 }` -> surgically re-take a single line in ~2.5s and re-stitch the master scene.
 - `POST /api/scenes/batch` — `{ "scenes": [ ... ] }` -> render multiple game skits in one batch job.
 - `GET  /api/scenes/{scene_id}/export.zip` — Download complete Unity/Unreal/Godot cutscene bundle (`master_scene.wav`, `subtitles.srt`, `manifest.json`, `lines/001_<speaker>.wav`).
+- `POST /api/cast/produce` — `{ "script": "...", "voices": {"Bob": "voice id/name" | "profile:Tamair" | "new voice description"}, "dry_run": false }` -> the whole Casting Desk in one call: read the script, cast everyone, pick emotion clips, render.
+- `POST /api/scenes/{scene_id}/check` — Whisper-check every line against the script; returns `flagged` line indexes. Then `reroll-line` or `POST /api/scenes/{scene_id}/use-take` (`{ "line_index": 3, "take_id": "..." }` from the line's `candidates`).
+- `GET /api/profiles`, `POST /api/profiles`, `POST /api/profiles/{id}/clips/from-path` (`{ "emotion": "sad", "audio_path": "/path.m4a" }`), `POST /api/profiles/{id}/clips/link`, `GET /api/profiles/emotions` — Clone Studio profiles (one clip per emotion).
+- `GET /api/voices`, `PATCH /api/characters/{id}`, `POST /api/characters/{id}/retranscribe` — Voice Library management.
+- `GET/POST /api/casts`, `POST /api/casts/{id or name}/render` — saved casts.
+- `GET  /api/capabilities` — every endpoint, grouped, generated live. Full schemas at `/openapi.json`.
+- **Tools for agents:** `voiceforge_mcp.py` is an MCP server (`claude mcp add voiceforge -- python3 voiceforge_mcp.py`) and a CLI (`list` / `describe` / `call`) exposing every endpoint as a tool. See `AGENTS.md`.
 ```
