@@ -316,6 +316,10 @@ class SceneLineItem(BaseModel):
         None,
         description="Optional local path to an audio recording (.wav, .m4a, .mp3, etc.) to immediately clone and lock as this character.",
     )
+    context_reset: bool = Field(
+        False,
+        description="Don't feed this line the previous line's audio, so a sudden emotion jump (e.g. calm to shouting) lands at full strength. Later lines still chain from it.",
+    )
     continuity_group: Optional[str] = Field(
         None,
         description="Lines sharing a group chain context into each other even when they use different voices (e.g. one person's emotion clips 'Tamair (Angry)' and 'Tamair (Sad)'), so emotion shifts carry over gradually. Defaults to the speaker.",
@@ -408,6 +412,19 @@ class SceneRenderRequest(BaseModel):
             "Enable Rolling Audio+Text Context Chaining: each line sees both the character's permanent Golden Reference "
             "AND the immediately preceding line's audio + transcript so pitch, cadence, and conversational flow carry over naturally!"
         ),
+    )
+    natural_pacing: bool = Field(
+        True,
+        description=(
+            "Vary the gap after lines that have no explicit `pause_after_ms`: quick replies, a beat after questions and "
+            "emotion shifts, longer after trailing-off '...', and an overlap when a line is cut off with '—'. Scaled by `default_pause_ms`."
+        ),
+    )
+    takes_per_line: int = Field(
+        1,
+        ge=1,
+        le=4,
+        description="Generate this many takes of every cloned line and keep the best (Whisper word match, plausible length, pitch close to the voice). Costs N x render time.",
     )
 
 
@@ -1229,7 +1246,28 @@ def _level_line(audio: np.ndarray, sample_rate: int) -> np.ndarray:
     return (audio * 10 ** (min(gain_db, max_gain_db) / 20)).astype(np.float32)
 
 
-def _mix_segments_into_master(segment_records: List[dict], sample_rate: int = 24000, level_lines: bool = True) -> np.ndarray:
+def _trim_edges(audio: np.ndarray, sample_rate: int, lead_ms: int = 40, tail_ms: int = 90) -> np.ndarray:
+    """Cut the dead air TTS leaves before/after a line (it varies 0-0.6s) so scene gaps are what we ask for."""
+    hop = max(1, int(sample_rate * 0.01))
+    n = audio.shape[0] // hop
+    if n < 10:
+        return audio
+    db = 20 * np.log10(np.sqrt(np.mean(audio[: n * hop].reshape(n, hop) ** 2, axis=1)) + 1e-9)
+    voiced = np.where(db > db.max() - 35)[0]
+    if voiced.size == 0:
+        return audio
+    start = max(0, voiced[0] * hop - int(sample_rate * lead_ms / 1000))
+    end = min(audio.shape[0], (voiced[-1] + 1) * hop + int(sample_rate * tail_ms / 1000))
+    out = audio[start:end].copy()
+    fade = min(int(sample_rate * 0.01), out.shape[0] // 4)
+    if fade > 0:
+        ramp = np.linspace(0.0, 1.0, fade, dtype=np.float32)
+        out[:fade] *= ramp
+        out[-fade:] *= ramp[::-1]
+    return out
+
+
+def _mix_segments_into_master(segment_records: List[dict], sample_rate: int = 24000, level_lines: bool = True, trim_edges: bool = True) -> np.ndarray:
     """
     Mix and stitch ordered segment WAV files into a single master 24kHz timeline.
     Supports both positive turn-taking pauses (`pause_after_ms >= 0`) AND negative
@@ -1250,6 +1288,8 @@ def _mix_segments_into_master(segment_records: List[dict], sample_rate: int = 24
             if audio.ndim > 1:
                 audio = audio.mean(axis=1)
 
+        if trim_edges:
+            audio = _trim_edges(audio, sample_rate)
         if level_lines:
             audio = _level_line(audio, sample_rate)
 
@@ -1339,6 +1379,78 @@ def _write_scene_package_files(scene_record: dict) -> None:
         ],
     }
     _write_json(manifest_path, manifest_payload)
+
+
+_REF_PITCH_CACHE: Dict[str, float] = {}
+
+
+def _ref_pitch(char: dict) -> float:
+    if char["id"] not in _REF_PITCH_CACHE:
+        try:
+            a, sr = sf.read(str(CHARACTERS_DIR / char["audio_file"]), dtype="float32")
+            _REF_PITCH_CACHE[char["id"]] = float(analyze_voice_acoustics(a if a.ndim == 1 else a.mean(axis=1), sr).get("pitch_hz_median", 0.0))
+        except Exception:
+            _REF_PITCH_CACHE[char["id"]] = 0.0
+    return _REF_PITCH_CACHE[char["id"]]
+
+
+def _score_take(take: dict, text: str, char: dict) -> Tuple[float, dict]:
+    """Higher is better: words match the script, length is plausible for the text, pitch stays near the voice."""
+    import difflib
+
+    try:
+        heard = _transcribe(TAKES_DIR / take["filename"])
+    except Exception:
+        heard = ""
+    want = _norm_words(text)
+    match = difflib.SequenceMatcher(None, want, _norm_words(heard)).ratio() if want else 1.0
+    n_chars = max(1, len(re.sub(r"<[^>]+>", "", text).strip()))
+    ms_per_char = take["metrics"]["duration_sec"] * 1000 / n_chars
+    length_penalty = max(0.0, ms_per_char - 130) / 100 + max(0.0, 40 - ms_per_char) / 40
+    ref_hz, hz = _ref_pitch(char), float(take["metrics"].get("pitch_hz_median", 0.0) or 0.0)
+    # Pitch only counts once it drifts >~10% from the reference clip, and never outweighs getting the words right
+    pitch_penalty = max(0.0, abs(np.log2(hz / ref_hz)) - 0.15) * 0.4 if ref_hz > 0 and hz > 0 else 0.0
+    score = 2.0 * match - length_penalty - pitch_penalty
+    return score, {"match": round(match, 2), "ms_per_char": round(ms_per_char), "pitch_hz": round(hz), "score": round(score, 3)}
+
+
+def _pick_best_take(candidates: List[dict], text: str, char: dict) -> dict:
+    scored = [(_score_take(t, text, char), t) for t in candidates]
+    (best_score, best_info), best = max(scored, key=lambda x: x[0][0])
+    best = dict(best)
+    best["candidates"] = [{"take_id": t["id"], "url": t["url"], **info} for (_, info), t in scored]
+    return best
+
+
+_CALM_EMOTIONS = ("neutral", "tired", "sad", "whisper", "confused")
+
+
+def _natural_gap_ms(line: SceneLineItem, nxt: SceneLineItem, base_ms: int) -> int:
+    """Gap after `line` based on how it ends and what comes next, scaled so base_ms=280 gives the defaults."""
+    text = line.text.strip()
+    scale = max(0.0, base_ms / 280.0)
+    same_person = _continuity_key(line) == _continuity_key(nxt)
+    if text.endswith(("—", "–", "--", "-")):
+        return -180  # cut off: next speaker barges in
+    if same_person and line.speaker.strip().lower() == nxt.speaker.strip().lower():
+        gap = 220  # same voice carrying on
+    elif same_person:
+        gap = 480  # same person, new emotion: a beat to shift gear
+    else:
+        gap = 300
+    if text.endswith(("...", "…")):
+        gap += 400
+    elif text.endswith("?"):
+        gap += 60
+    elif text.endswith("!"):
+        gap -= 60
+    if len(_norm_words(text)) > 16:
+        gap += 120  # a breath after a long line
+    nxt_text = nxt.text.strip()
+    letters = [c for c in nxt_text if c.isalpha()]
+    if letters and sum(c.isupper() for c in letters) / len(letters) > 0.7:
+        gap -= 120  # shouted reply comes in hot
+    return int(round(gap * scale))
 
 
 def _continuity_key(line: SceneLineItem) -> str:
@@ -1571,7 +1683,7 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
         # Rolling Audio+Text Context Chaining: find this character's most recent previous rendered line in the skit!
         prev_audio_path = None
         prev_text = None
-        if req.context_continuity:
+        if req.context_continuity and not line.context_reset:
             group = _continuity_key(line)
             for prev_idx in range(idx - 1, -1, -1):
                 if prev_idx in pre_rendered_takes and _continuity_key(lines[prev_idx]) == group:
@@ -1585,21 +1697,26 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
             last_used_model = target_eng
 
         if target_eng == "qwen3_clone" and existing_char is not None:
-            take = _run_synthesis_and_save(
-                SynthesizeRequest(
-                    model_id="qwen3_clone",
-                    character_id=existing_char["id"],
-                    text=line.text.strip(),
-                    speed=line_speed,
-                    trim_silence=req.trim_silence,
-                    temperature=line_temp,
-                    top_p=line_top_p,
-                    repetition_penalty=line_rep,
-                    seed=line_seed,
-                    prev_audio_path=prev_audio_path,
-                    prev_text=prev_text,
-                )
-            )
+            n_takes = 1 if line_seed is not None else req.takes_per_line
+            candidates = []
+            for k in range(n_takes):
+                candidates.append(_run_synthesis_and_save(
+                    SynthesizeRequest(
+                        model_id="qwen3_clone",
+                        character_id=existing_char["id"],
+                        text=line.text.strip(),
+                        speed=line_speed,
+                        trim_silence=req.trim_silence,
+                        temperature=line_temp,
+                        top_p=line_top_p,
+                        repetition_penalty=line_rep,
+                        # Clone mode otherwise falls back to one stable seed per character, which would repeat the same take
+                        seed=line_seed if n_takes == 1 else random.randint(1, 2**31 - 1),
+                        prev_audio_path=prev_audio_path,
+                        prev_text=prev_text,
+                    )
+                ))
+            take = _pick_best_take(candidates, line.text, existing_char) if len(candidates) > 1 else candidates[0]
             action = "reused_locked_character_context_chained" if prev_audio_path else "reused_locked_character"
             instruct = existing_char.get("description", "")
         else:
@@ -1647,7 +1764,12 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
         speaker = line.speaker.strip()
         s_key = speaker.lower()
         take, action, char_obj, instruct_used, line_speed = pre_rendered_takes[idx]
-        pause_ms = line.pause_after_ms if line.pause_after_ms is not None else req.default_pause_ms
+        if line.pause_after_ms is not None:
+            pause_ms = line.pause_after_ms
+        elif req.natural_pacing and idx < len(lines) - 1:
+            pause_ms = _natural_gap_ms(line, lines[idx + 1], req.default_pause_ms)
+        else:
+            pause_ms = req.default_pause_ms
 
         if speaker not in cast_summary or action == "created_and_locked":
             cast_summary[speaker] = {
@@ -1672,6 +1794,7 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
             "voice_register": take["metrics"].get("voice_register", ""),
             "take_id": take["id"],
             "take_url": take["url"],
+            "candidates": take.get("candidates", []),
             "duration_sec": take["metrics"]["duration_sec"],
             "start_sec": 0.0,
             "end_sec": 0.0,
@@ -1808,6 +1931,9 @@ def api_reroll_scene_line(scene_id: str, req: RerollSceneLineRequest):
     target_seg["speed"] = new_speed
     target_seg["pitch_hz_median"] = new_take["metrics"].get("pitch_hz_median", 0.0)
     target_seg["voice_register"] = new_take["metrics"].get("voice_register", "")
+    # Keep earlier takes switchable so a re-roll never loses a take you liked
+    previous = target_seg.get("candidates") or [{"take_id": target_seg["take_id"], "url": target_seg["take_url"]}]
+    target_seg["candidates"] = previous + [{"take_id": new_take["id"], "url": new_take["url"], "rerolled": True}]
     target_seg["take_id"] = new_take["id"]
     target_seg["take_url"] = new_take["url"]
     target_seg["action"] = f"rerolled_with_{model_id}"
@@ -1831,6 +1957,38 @@ def api_reroll_scene_line(scene_id: str, req: RerollSceneLineRequest):
         "takes": _read_json(TAKES_JSON, [])[:40],
         "status": engine.get_status(),
     }
+
+
+class UseTakeRequest(BaseModel):
+    line_index: int = Field(..., ge=1, description="1-based line index in the scene.")
+    take_id: str = Field(..., description="One of that line's `candidates` take ids.")
+
+
+@app.post("/api/scenes/{scene_id}/use-take", tags=["Multi-Character Scene Director"])
+def api_use_scene_take(scene_id: str, req: UseTakeRequest):
+    """Swap a line to one of its other takes (best-of-N runners-up or earlier re-rolls) and re-stitch the scene."""
+    scenes = _read_json(SCENES_JSON, [])
+    scene = next((s for s in scenes if s["id"] == scene_id), None)
+    if not scene:
+        raise HTTPException(status_code=404, detail=f"Scene '{scene_id}' not found.")
+    seg = next((g for g in scene.get("segments", []) if g["index"] == req.line_index), None)
+    if not seg:
+        raise HTTPException(status_code=404, detail=f"Line {req.line_index} not found.")
+    cand = next((c for c in seg.get("candidates", []) if c["take_id"] == req.take_id), None)
+    take = next((t for t in _read_json(TAKES_JSON, []) if t["id"] == req.take_id), None)
+    if not cand or not (TAKES_DIR / f"{req.take_id}.wav").exists():
+        raise HTTPException(status_code=404, detail="That take is not available for this line any more.")
+    seg["take_id"] = req.take_id
+    seg["take_url"] = cand["url"]
+    if take:
+        seg["pitch_hz_median"] = take["metrics"].get("pitch_hz_median", 0.0)
+    sample_rate = 24000
+    master_audio = _mix_segments_into_master(scene["segments"], sample_rate=sample_rate)
+    sf.write(str(SCENES_DIR / scene["filename"]), master_audio, sample_rate, subtype="PCM_16")
+    scene["duration_sec"] = round(master_audio.shape[0] / sample_rate, 2)
+    _write_scene_package_files(scene)
+    _write_json(SCENES_JSON, scenes)
+    return {"scene": scene}
 
 
 @app.get("/api/scenes/{scene_id}/export.zip", tags=["Multi-Character Scene Director"])

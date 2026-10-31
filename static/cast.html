@@ -125,6 +125,8 @@
     .newvoice textarea { min-height: 84px; font-size: 12px; }
     .profile-strip { display: flex; gap: 4px; align-items: center; font-size: 15px; padding: 4px 6px; border-radius: 8px; background: var(--bg-input); }
     .profile-strip span { cursor: pointer; }
+    .hit-on { border-color: rgba(245, 158, 11, 0.6); color: #fcd34d; background: rgba(245, 158, 11, 0.12); }
+    .take-pick { width: auto; padding: 3px 6px; font-size: 11px; }
     .emo-chip { font-size: 10.5px; color: #c4b5fd; }
     .improve-note { font-size: 11px; color: #c4b5fd; }
     .auditions { display: flex; flex-direction: column; gap: 4px; padding: 6px; border-radius: 8px; background: var(--bg-input); }
@@ -253,7 +255,20 @@
           </div>
           <div>
             <label class="check"><input type="checkbox" id="continuity" checked /> Context continuity</label>
-            <div class="dim">Each line hears the speaker's previous line so delivery flows.</div>
+            <div class="dim">Each line hears the speaker's previous line so delivery flows. ⚡ on a line skips this so a big emotion jump hits fully.</div>
+          </div>
+          <div>
+            <label class="check"><input type="checkbox" id="naturalPacing" checked /> Natural pacing</label>
+            <div class="dim">Trims dead air and varies gaps: quick replies, a beat on emotion shifts, overlaps when a line is cut off with "—".</div>
+          </div>
+          <div>
+            <label class="field" style="margin-top: 0;">Takes per line</label>
+            <select id="takesPerLine">
+              <option value="1">1 (fastest)</option>
+              <option value="2" selected>Best of 2</option>
+              <option value="3">Best of 3</option>
+            </select>
+            <div class="dim">Keeps the take whose words, length and pitch fit best. Runners-up stay one click away.</div>
           </div>
         </div>
       </div>
@@ -819,6 +834,7 @@
           </div>
           <select class="line-variant" title="Use a different voice for just this line" onchange="state.lines[${i}].variantId = this.value; state.lines[${i}].variantManual = true; state.lines[${i}].profileEmotion = ''">${voiceOptions(l.variantId, false, '↳ cast voice', castByKey(l.speaker) ? castByKey(l.speaker).name : '')}</select>
           <span class="row tight">
+            <button class="btn-sm ${hitsHard(l) ? 'hit-on' : ''}" title="Hit hard: don't carry the previous line's mood into this one (good for sudden shouts). Auto-on for shouting lines." onclick="toggleHitHard(${i})">⚡</button>
             <button class="btn-sm" title="Hear just this line in its voice" onclick="previewLine(${i}, this)">▶</button>
             <button class="btn-sm" title="Move up" onclick="moveLine(${i}, -1)">↑</button>
             <button class="btn-sm rose" title="Delete line" onclick="state.lines.splice(${i}, 1); renderAll()">✕</button>
@@ -847,6 +863,12 @@
       btn.innerHTML = '▶'; btn.disabled = false;
       setTts(false);
     }
+    // ⚡ "hit hard": undefined = auto (on for shouting lines), otherwise the user's choice
+    function hitsHard(l) {
+      if (l.hitHard !== undefined) return l.hitHard;
+      return (l.profileEmotion || l.emotion) === 'shouting';
+    }
+    function toggleHitHard(i) { const l = state.lines[i]; l.hitHard = !hitsHard(l); renderLines(); }
     function moveLine(i, dir) {
       const j = i + dir;
       if (j < 0 || j >= state.lines.length) return;
@@ -893,8 +915,15 @@
           voiceId = l.variantId;
         }
         cast[speaker] = { character_id: voiceId };
+        const item = { speaker, text: l.text.trim(), context_reset: hitsHard(l) };
         // One person's emotion clips chain into each other so emotion shifts carry over gradually
-        lines.push(c.profileId ? { speaker, text: l.text.trim(), continuity_group: c.name } : { speaker, text: l.text.trim() });
+        if (c.profileId) item.continuity_group = c.name;
+        lines.push(item);
+      });
+      // A line whose direction says it interrupts cuts into the line before it
+      const kept = state.lines.filter(l => castByKey(l.speaker) && l.text.trim());
+      kept.forEach((l, k) => {
+        if (k > 0 && /interrupt|cuts? in|cutting in|cutting (him|her|them) off/i.test(l.direction || '')) lines[k - 1].pause_after_ms = -220;
       });
       return {
         title: $('sceneTitle').value.trim() || 'Untitled Scene',
@@ -902,6 +931,8 @@
         default_pause_ms: parseInt($('pauseMs').value || '280', 10),
         temperature: tempValue(),
         context_continuity: $('continuity').checked,
+        natural_pacing: $('naturalPacing').checked,
+        takes_per_line: parseInt($('takesPerLine').value, 10),
       };
     }
     async function renderScene() {
@@ -911,7 +942,7 @@
       const btn = $('renderBtn');
       btn.disabled = true;
       const started = Date.now();
-      const tick = setInterval(() => { btn.innerHTML = `<span class="spinner"></span> Rendering ${req.lines.length} lines… ${Math.round((Date.now() - started) / 1000)}s`; }, 500);
+      const tick = setInterval(() => { btn.innerHTML = `<span class="spinner"></span> Rendering ${req.lines.length} lines${req.takes_per_line > 1 ? ` × ${req.takes_per_line} takes` : ''}… ${Math.round((Date.now() - started) / 1000)}s`; }, 500);
       setTts(true, 'Rendering scene');
       try {
         const d = await api('/api/scenes/render', { method: 'POST', body: JSON.stringify(req) });
@@ -978,6 +1009,9 @@
             </div>
             <span class="row tight">
               <button class="btn-sm" onclick="play('${seg.take_url}')" title="Play just this line">▶</button>
+              ${(seg.candidates || []).length > 1 ? `<select class="take-pick" title="Switch this line to another take" onchange="useTake(${seg.index}, this.value)">
+                ${seg.candidates.map((cd, k) => `<option value="${cd.take_id}" ${cd.take_id === seg.take_id ? 'selected' : ''}>${cd.rerolled ? 'Re-roll' : 'Take'} ${k + 1}${cd.match !== undefined ? ` · ${Math.round(cd.match * 100)}%` : ''}${cd.take_id === seg.take_id ? ' ✓' : ''}</option>`).join('')}
+              </select>` : ''}
               <button class="btn-sm violet" onclick="rerollLine(${seg.index}, this)" title="Re-generate this line with a fresh take and re-stitch the scene">🎲 Re-roll</button>
             </span>
           </div>`).join('')}`;
@@ -987,6 +1021,19 @@
       $('sceneAudio').addEventListener('play', () => { if (player) stopPlayback(); });
       if (autoplay) { const a = $('sceneAudio'); a.play().catch(() => {}); }
       if (scroll) $('resultPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    async function useTake(index, takeId) {
+      const s = state.scene;
+      setTts(true, 'Switching line ' + index);
+      try {
+        const d = await api(`/api/scenes/${s.id}/use-take`, { method: 'POST', body: JSON.stringify({ line_index: index, take_id: takeId }) });
+        state.scene = d.scene;
+        if (state.qc) { state.qc.lines = state.qc.lines.filter(x => x.index !== index); state.qc.flagged = state.qc.flagged.filter(x => x !== index); }
+        showResult(false, false);
+        const seg = state.scene.segments.find(x => x.index === index);
+        if (seg) play(seg.take_url, `Line ${index} · ${seg.speaker}`);
+      } catch (e) { toast('Switch failed: ' + e.message, 6000); showResult(false, false); }
+      setTts(false);
     }
     async function rerollLine(index, btn, quiet = false) {
       const s = state.scene;
@@ -1104,10 +1151,12 @@ MARK: ...Dav from upstairs?`;
           title: $('sceneTitle').value,
           cast: state.cast.map(c => ({ key: c.key, scriptName: c.scriptName, name: c.name, description: c.description, voiceId: c.voiceId, profileId: c.profileId || '',
             newVoice: { open: c.newVoice.open, description: c.newVoice.description, sample: c.newVoice.sample } })),
-          lines: state.lines.map(l => ({ speaker: l.speaker, text: l.text, direction: l.direction, emotion: l.emotion || '', variantId: l.variantId, variantManual: !!l.variantManual, profileEmotion: l.profileEmotion || '' })),
+          lines: state.lines.map(l => ({ speaker: l.speaker, text: l.text, direction: l.direction, emotion: l.emotion || '', variantId: l.variantId, variantManual: !!l.variantManual, profileEmotion: l.profileEmotion || '', hitHard: l.hitHard })),
           temperature: rawTemp(),
           pause: $('pauseMs').value,
           continuity: $('continuity').checked,
+          pacing: $('naturalPacing').checked,
+          takes: $('takesPerLine').value,
           sceneId: state.scene ? state.scene.id : null,
         }));
       } catch (e) { /* storage unavailable */ }
@@ -1126,6 +1175,8 @@ MARK: ...Dav from upstairs?`;
       if (d.temperature !== null && d.temperature !== undefined) { $('tempAuto').checked = false; $('tempSlider').value = d.temperature; }
       if (d.pause) $('pauseMs').value = d.pause;
       if (d.continuity === false) $('continuity').checked = false;
+      if (d.pacing === false) $('naturalPacing').checked = false;
+      if (d.takes) $('takesPerLine').value = d.takes;
       syncTemp();
       renderAll();
       const sc = (state.recentScenes || []).find(x => x.id === d.sceneId);
