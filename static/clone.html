@@ -158,12 +158,12 @@
 
       <div class="panel sticky">
         <div class="panel-title"><span>Microphone</span></div>
-        <select id="micSelect" onchange="savePrefs()"><option value="">Default microphone</option></select>
+        <select id="micSelect" onchange="savePrefs(); if (micIsOn()) { disarmMic(); armMic().catch(() => {}); }"><option value="">Default microphone</option></select>
         <div class="row" style="margin-top: 8px;">
-          <button class="btn-sm" id="micTestBtn" onclick="toggleMicTest()">🎚 Test level</button>
+          <button class="btn-sm" id="micTestBtn" onclick="toggleMicTest()">🎚 Mic on</button>
           <div class="meter grow"><div id="testMeter"></div></div>
         </div>
-        <div class="dim" style="margin-top: 6px;">Speak at performance volume. Aim for the bar to reach the yellow on loud words and never hit red.</div>
+        <div class="dim" style="margin-top: 6px;">Switch the mic on before a recording session: it stays on between takes so every take starts at full level. Aim for the yellow on loud words, never red.</div>
 
         <details class="tips" open style="margin-top: 14px;">
           <summary>🎙 Why recordings sound strange, and how to fix it</summary>
@@ -370,7 +370,7 @@
           <button class="btn-sm violet" onclick="claudeScript('${e.id}', this)" title="Claude writes a fresh line for this emotion, fitting the profile notes">✨ Write one</button>
         </div>
         ${rec ? `
-          ${state.recording.countdown ? `<div class="countdown">${state.recording.countdown}</div>` : `
+          ${state.recording.countdown ? `<div class="countdown" style="${typeof state.recording.countdown === 'string' ? 'font-size: 15px;' : ''}">${state.recording.countdown}</div>` : `
           <div class="row nowrap"><span class="badge bad">● REC <span id="recTime">0.0</span>s</span><div class="meter grow"><div id="recMeter"></div></div></div>`}
           <button class="btn-sm rec" onclick="stopRecording()">⏹ Stop</button>` : `
         <div class="row">
@@ -428,72 +428,101 @@
           `<option value="${m.deviceId}" ${m.deviceId === saved ? 'selected' : ''}>${escapeHtml(m.label || 'Microphone ' + (i + 1))}</option>`).join('');
       } catch (e) { /* no media devices */ }
     }
-    function attachMeter(stream, elId) {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const src = ctx.createMediaStreamSource(stream);
-      const an = ctx.createAnalyser(); an.fftSize = 1024;
-      src.connect(an);
-      const buf = new Float32Array(an.fftSize);
-      let raf;
+    // The mic stays open between takes: some mics (the MacBook's built-in one especially) come in very quiet
+    // for the first few seconds after a browser opens them, so the first take gets a warm-up and later takes
+    // start instantly. Audio is captured as raw PCM and saved as a lossless WAV.
+    const MIC_WARMUP_MS = 4500;
+    const MIC_IDLE_CLOSE_MS = 4 * 60 * 1000;
+    const mic = { stream: null, ctx: null, analyser: null, proc: null, deviceId: null, capture: null, idleTimer: null, raf: null };
+    function micIsOn() { return !!(mic.stream && mic.stream.active && mic.ctx && mic.ctx.state !== 'closed'); }
+    async function armMic() {
+      const want = $('micSelect').value;
+      if (micIsOn() && mic.deviceId === want) { bumpIdle(); return false; }
+      disarmMic();
+      mic.stream = await navigator.mediaDevices.getUserMedia(micConstraints());
+      mic.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = mic.ctx.createMediaStreamSource(mic.stream);
+      mic.analyser = mic.ctx.createAnalyser(); mic.analyser.fftSize = 1024;
+      mic.proc = mic.ctx.createScriptProcessor(4096, 1, 1);
+      mic.proc.onaudioprocess = e => { if (mic.capture) mic.capture.push(new Float32Array(e.inputBuffer.getChannelData(0))); };
+      const mute = mic.ctx.createGain(); mute.gain.value = 0;  // processor must reach the destination to run; keep it silent
+      src.connect(mic.analyser); src.connect(mic.proc); mic.proc.connect(mute); mute.connect(mic.ctx.destination);
+      mic.deviceId = want;
+      listMics(); meterLoop(); bumpIdle(); updateMicButton();
+      return true;
+    }
+    function disarmMic() {
+      if (mic.raf) cancelAnimationFrame(mic.raf);
+      if (mic.stream) mic.stream.getTracks().forEach(t => t.stop());
+      if (mic.ctx && mic.ctx.state !== 'closed') mic.ctx.close();
+      Object.assign(mic, { stream: null, ctx: null, analyser: null, proc: null, capture: null, raf: null });
+      clearTimeout(mic.idleTimer);
+      ['testMeter', 'recMeter'].forEach(id => { const el = $(id); if (el) el.style.width = '0'; });
+      updateMicButton();
+    }
+    function bumpIdle() {
+      clearTimeout(mic.idleTimer);
+      mic.idleTimer = setTimeout(() => { if (!state.recording) { disarmMic(); toast('Mic switched off after a few idle minutes.'); } }, MIC_IDLE_CLOSE_MS);
+    }
+    function meterLoop() {
+      const buf = new Float32Array(1024);
       const tick = () => {
-        an.getFloatTimeDomainData(buf);
+        if (!mic.analyser) return;
+        mic.analyser.getFloatTimeDomainData(buf);
         let peak = 0; for (const v of buf) peak = Math.max(peak, Math.abs(v));
-        const db = 20 * Math.log10(peak + 1e-9);            // -60..0 dBFS -> 0..100%
-        const el = $(elId); if (el) el.style.width = Math.max(0, Math.min(100, (db + 60) / 60 * 100)) + '%';
-        raf = requestAnimationFrame(tick);
+        const pct = Math.max(0, Math.min(100, (20 * Math.log10(peak + 1e-9) + 60) / 60 * 100));  // -60..0 dBFS
+        ['testMeter', 'recMeter'].forEach(id => { const el = $(id); if (el) el.style.width = pct + '%'; });
+        mic.raf = requestAnimationFrame(tick);
       };
       tick();
-      return () => { cancelAnimationFrame(raf); ctx.close(); };
     }
-    let micTest = null;
+    function updateMicButton() { const b = $('micTestBtn'); if (b) b.textContent = micIsOn() ? '⏹ Mic off' : '🎚 Mic on'; }
     async function toggleMicTest() {
-      if (micTest) { micTest.stop(); micTest = null; $('micTestBtn').textContent = '🎚 Test level'; $('testMeter').style.width = '0'; return; }
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia(micConstraints());
-        listMics();
-        const stopMeter = attachMeter(stream, 'testMeter');
-        micTest = { stop: () => { stopMeter(); stream.getTracks().forEach(t => t.stop()); } };
-        $('micTestBtn').textContent = '⏹ Stop test';
-      } catch (e) { toast('Microphone blocked: ' + e.message, 6000); }
+      if (micIsOn()) { disarmMic(); return; }
+      try { await armMic(); toast('Mic is on and warming up. It stays on between takes so recordings start at full level.', 5000); }
+      catch (e) { toast('Microphone blocked: ' + e.message, 6000); }
     }
+    function encodeWav(chunks, sampleRate) {
+      const len = chunks.reduce((n, c) => n + c.length, 0);
+      const buf = new ArrayBuffer(44 + len * 2);
+      const v = new DataView(buf);
+      const str = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+      str(0, 'RIFF'); v.setUint32(4, 36 + len * 2, true); str(8, 'WAVE'); str(12, 'fmt ');
+      v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+      v.setUint32(24, sampleRate, true); v.setUint32(28, sampleRate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+      str(36, 'data'); v.setUint32(40, len * 2, true);
+      let o = 44;
+      for (const c of chunks) for (let i = 0; i < c.length; i++, o += 2) {
+        const x = Math.max(-1, Math.min(1, c[i]));
+        v.setInt16(o, x < 0 ? x * 0x8000 : x * 0x7fff, true);
+      }
+      return new Blob([buf], { type: 'audio/wav' });
+    }
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
     async function startRecording(emo) {
-      if (micTest) toggleMicTest();
       stopPlayback();
-      let stream;
-      try { stream = await navigator.mediaDevices.getUserMedia(micConstraints()); }
+      let fresh;
+      try { fresh = await armMic(); }
       catch (e) { toast('Microphone blocked: ' + e.message + '. Allow mic access for this page.', 7000); return; }
-      listMics();
-      state.recording = { emotion: emo, stream, countdown: 3 };
+      if (mic.ctx.state === 'suspended') await mic.ctx.resume();
+      state.recording = { emotion: emo, countdown: fresh ? 'Warming up the mic…' : 3 };
       renderProfile();
+      if (fresh) {
+        await sleep(MIC_WARMUP_MS - 2100);
+        if (!state.recording) return;
+        state.recording.countdown = 3; renderProfile();
+      }
       for (const n of [2, 1]) {
-        await new Promise(r => setTimeout(r, 700));
+        await sleep(700);
         if (!state.recording) return;
         state.recording.countdown = n; renderProfile();
       }
-      await new Promise(r => setTimeout(r, 700));
+      await sleep(700);
       if (!state.recording) return;
       state.recording.countdown = 0;
       renderProfile();
-      const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || '';
-      const recorder = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 192000 } : undefined);
-      const chunks = [];
-      recorder.ondataavailable = ev => { if (ev.data.size) chunks.push(ev.data); };
-      recorder.onstop = () => {
-        const type = recorder.mimeType || 'audio/webm';
-        const blob = new Blob(chunks, { type });
-        const seconds = (Date.now() - state.recording.started) / 1000;
-        stream.getTracks().forEach(t => t.stop());
-        state.recording.stopMeter && state.recording.stopMeter();
-        if (state.takes[emo] && state.takes[emo].url) URL.revokeObjectURL(state.takes[emo].url);
-        state.takes[emo] = { blob, url: URL.createObjectURL(blob), seconds, ext: type.includes('mp4') ? '.m4a' : '.webm' };
-        state.recording = null;
-        renderProfile();
-        play(state.takes[emo].url, 'New take · listen back');
-      };
-      state.recording.recorder = recorder;
+      mic.capture = [];
       state.recording.started = Date.now();
-      state.recording.stopMeter = attachMeter(stream, 'recMeter');
-      recorder.start(250);
       state.recording.timer = setInterval(() => {
         const t = $('recTime'); if (t && state.recording) t.textContent = ((Date.now() - state.recording.started) / 1000).toFixed(1);
         if (state.recording && Date.now() - state.recording.started > 30000) stopRecording();  // safety cap
@@ -503,19 +532,30 @@
       const r = state.recording;
       if (!r) return;
       clearInterval(r.timer);
-      if (r.recorder && r.recorder.state !== 'inactive') r.recorder.stop();
-      else { r.stream.getTracks().forEach(t => t.stop()); state.recording = null; renderProfile(); }
+      state.recording = null;
+      bumpIdle();
+      if (!mic.capture || !r.started) { mic.capture = null; renderProfile(); return; }  // cancelled during countdown
+      const chunks = mic.capture; mic.capture = null;
+      const sr = mic.ctx.sampleRate;
+      const seconds = chunks.reduce((n, c) => n + c.length, 0) / sr;
+      const emo = r.emotion;
+      if (state.takes[emo] && state.takes[emo].url) URL.revokeObjectURL(state.takes[emo].url);
+      const blob = encodeWav(chunks, sr);
+      state.takes[emo] = { blob, url: URL.createObjectURL(blob), seconds, ext: '.wav' };
+      renderProfile();
+      play(state.takes[emo].url, 'New take · listen back');
     }
     document.addEventListener('keydown', e => {
       if (e.code === 'Space' && state.recording && !state.recording.countdown && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) && !document.activeElement.isContentEditable) {
         e.preventDefault(); stopRecording();
       }
     });
+    window.addEventListener('beforeunload', disarmMic);
     function discardTake(emo) { if (state.takes[emo]) URL.revokeObjectURL(state.takes[emo].url); delete state.takes[emo]; renderProfile(); }
     async function saveTake(emo) {
       const take = state.takes[emo];
       if (!take) return;
-      await sendClip(emo, new File([take.blob], `${emo}${take.ext}`, { type: take.blob.type }));
+      await sendClip(emo, new File([take.blob], `${emo}${take.ext}`, { type: take.blob.type }), 'browser');
       discardTake(emo);
     }
     async function uploadTake(emo, input) {
@@ -524,10 +564,11 @@
       await sendClip(emo, file);
       input.value = '';
     }
-    async function sendClip(emo, file) {
+    async function sendClip(emo, file, source = 'upload') {
       const p = active();
       const form = new FormData();
       form.append('emotion', emo);
+      form.append('source', source);
       form.append('script', scriptFor(emo));
       form.append('file', file);
       state.busy[emo] = true; renderProfile();

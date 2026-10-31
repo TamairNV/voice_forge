@@ -890,6 +890,76 @@ def _find_optimal_reference_slice(audio_path: Union[str, Path]) -> Tuple[float, 
     return round(best[0], 2), round(best[1], 2)
 
 
+def _repair_gain_ramp(audio: np.ndarray, sr: int, max_head_sec: float = 4.0) -> Tuple[np.ndarray, Optional[dict]]:
+    """
+    Some mics (notably the MacBook's built-in one when a browser opens it) come in 15-25 dB quiet for the
+    first couple of seconds, then jump to full gain. Find that jump and lift everything before it to match.
+    Returns (audio, None) untouched when there's no such jump, e.g. a performance that just starts quietly.
+    """
+    hop = max(1, int(sr * 0.02))
+    n = audio.shape[0] // hop
+    if n < 150:
+        return audio, None
+    db = 20 * np.log10(np.sqrt(np.mean(audio[: n * hop].reshape(n, hop) ** 2, axis=1)) + 1e-9)
+    smooth = np.convolve(db, np.ones(5) / 5, mode="same")  # 100 ms
+    loud = db > np.percentile(db, 95) - 30
+    body = db[int(2.5 / 0.02):][loud[int(2.5 / 0.02):]]
+    if body.size < 50:
+        return audio, None
+    body_level = float(np.percentile(body, 80))
+    start = int(0.3 / 0.02)
+    cand = np.where(smooth[start: int(max_head_sec / 0.02)] > body_level - 10)[0]
+    if cand.size == 0:
+        return audio, None
+    t_frame = start + int(cand[0])
+    head = db[:t_frame]
+    head_speech = head[head > np.percentile(head, 95) - 25] if head.size else head
+    # A real gain ramp has words in the quiet part. A silent lead-in (room noise, a breath) is flat or too short.
+    if t_frame < int(1.2 / 0.02) or head_speech.size < 25:
+        return audio, None
+    head_level = float(np.percentile(head_speech, 80))
+    audible = head[head > -90]  # ignore digital silence
+    if audible.size < 25 or float(np.percentile(audible, 90) - np.percentile(audible, 10)) < 12.0:
+        return audio, None  # steady room noise, not syllables
+    lift = body_level - head_level - 2.0
+    if lift < 12.0:  # smaller differences are just a performance that starts softly
+        return audio, None
+    lift = min(lift, 30.0)
+    t = t_frame * hop
+    fade = min(int(0.06 * sr), t)
+    g = 10 ** (lift / 20)
+    gain = np.ones(audio.shape[0], dtype=np.float32)
+    gain[: t - fade] = g
+    gain[t - fade: t] = np.linspace(g, 1.0, fade, dtype=np.float32)
+    out = (audio * gain).astype(np.float32)
+    peak = float(np.max(np.abs(out)))
+    if peak > 0.98:
+        out *= 0.98 / peak
+    return out, {"ramp_sec": round(t / sr, 2), "lift_db": round(lift, 1)}
+
+
+def _repair_character_audio(char: dict) -> Optional[dict]:
+    """
+    Apply _repair_gain_ramp to a locked voice's reference clip. Always works from the untouched original
+    (kept in characters/originals/), so running it again never stacks a second lift on top.
+    """
+    path = CHARACTERS_DIR / char["audio_file"]
+    original = CHARACTERS_DIR / "originals" / char["audio_file"]
+    audio, sr = sf.read(str(original if original.exists() else path), dtype="float32")
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+    fixed, info = _repair_gain_ramp(audio, sr)
+    if not info:
+        if original.exists():
+            shutil.copy2(original, path)  # detection says there's nothing to fix: put the original back
+        return None
+    if not original.exists():
+        original.parent.mkdir(exist_ok=True)
+        shutil.copy2(path, original)
+    sf.write(str(path), fixed, sr, subtype="PCM_16")
+    return info
+
+
 def _ingest_audio_recording(
     audio_source: Union[str, Path],
     name: str,
@@ -897,6 +967,7 @@ def _ingest_audio_recording(
     description: Optional[str] = None,
     start_sec: Optional[float] = None,
     end_sec: Optional[float] = None,
+    repair_gain_ramp: bool = False,
 ) -> dict:
     """
     Ingests an external voice recording (.wav, .m4a, .mp3, etc.), extracts a pristine 24kHz mono Golden Reference,
@@ -928,6 +999,20 @@ def _ingest_audio_recording(
 
     subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
+    # Fix a quiet start (mic gain still settling) before transcribing, so Whisper hears the first words too
+    ramp_fix = None
+    if repair_gain_ramp:
+        try:
+            ref_audio, ref_sr = sf.read(str(dest_path), dtype="float32")
+            fixed, ramp_fix = _repair_gain_ramp(ref_audio if ref_audio.ndim == 1 else ref_audio.mean(axis=1), ref_sr)
+            if ramp_fix:
+                originals = CHARACTERS_DIR / "originals"
+                originals.mkdir(exist_ok=True)
+                shutil.copy2(dest_path, originals / dest_filename)
+                sf.write(str(dest_path), fixed, ref_sr, subtype="PCM_16")
+        except Exception:
+            ramp_fix = None
+
     if not ref_text or not ref_text.strip():
         try:
             import mlx_audio.stt as stt
@@ -948,6 +1033,8 @@ def _ingest_audio_recording(
         "source_model": "User Recording (Cloned)",
         "created_at": time.strftime("%Y-%m-%d %H:%M"),
     }
+    if ramp_fix:
+        char_record["gain_ramp_fixed"] = ramp_fix
 
     chars = _read_json(CHARACTERS_JSON, [])
     chars = [c for c in chars if c.get("name", "").strip().lower() != name.strip().lower() and c.get("id") != char_id]
@@ -2827,6 +2914,12 @@ def _analyze_recording(path: Union[str, Path]) -> dict:
         tips.append("Noticeable background noise between words. Turn off fans or AC, close the window, record in a room with soft furnishings.")
     if speech_db - noise_db < 25:
         tips.append("Your voice isn't far above the background noise, so the clone may pick up hiss or room sound.")
+    _, ramp = _repair_gain_ramp(audio, sr)
+    if ramp:
+        tips.append(
+            f"The first {ramp['ramp_sec']}s came in about {round(ramp['lift_db'])} dB quieter than the rest (the mic's gain was "
+            "still settling). Browser takes are evened out automatically; keeping the mic switched on between takes avoids it."
+        )
     if duration < 5:
         tips.append("Short clip. 8-12 seconds gives the clone more to learn from.")
     elif duration > 20:
@@ -2843,6 +2936,7 @@ def _analyze_recording(path: Union[str, Path]) -> dict:
         "speech_dbfs": round(speech_db, 1),
         "noise_floor_dbfs": round(noise_db, 1),
         "clipping_pct": round(clipped * 100, 3),
+        "gain_ramp": ramp,
         "score": max(0, score),
         "tips": tips,
     }
@@ -2955,6 +3049,7 @@ async def api_add_profile_clip(
     profile_id: str,
     emotion: str = Form(..., description="Emotion slot id."),
     script: str = Form("", description="What the user was asked to read; used as the transcript when Whisper agrees with it."),
+    source: str = Form("upload", description="'browser' for takes recorded on the Clone Studio page (their quiet-start mic ramp is repaired automatically)."),
     file: UploadFile = File(..., description="Recording (wav, mp3, m4a, mp4, webm…)."),
 ):
     """Record or upload one emotion for a profile. Cleans it into a 24kHz reference, transcribes it, checks levels and noise."""
@@ -2980,7 +3075,12 @@ async def api_add_profile_clip(
             wav_probe.unlink(missing_ok=True)
         except Exception:
             quality = None
-        char = _ingest_audio_recording(temp_path, name=f"{profile['name']} · {label}", description=f"{profile['name']}, {label.lower()} delivery. {profile.get('description', '')}".strip())
+        char = _ingest_audio_recording(
+            temp_path,
+            name=f"{profile['name']} · {label}",
+            description=f"{profile['name']}, {label.lower()} delivery. {profile.get('description', '')}".strip(),
+            repair_gain_ramp=(source == "browser"),
+        )
     finally:
         temp_path.unlink(missing_ok=True)
 
@@ -3008,6 +3108,28 @@ async def api_add_profile_clip(
         "quality": quality,
         "profiles": _profiles_with_clips(),
     }
+
+
+@app.post("/api/profiles/{profile_id}/repair", tags=["Clone Studio"])
+def api_repair_profile_clips(profile_id: str):
+    """Even out quiet starts (mic gain still settling) on every clip recorded for this profile. Originals are kept in characters/originals/."""
+    profile = _get_profile(profile_id)
+    chars = _read_json(CHARACTERS_JSON, [])
+    by_id = {c["id"]: c for c in chars}
+    results = {}
+    for clip in profile.get("clips", []):
+        ch = by_id.get(clip["character_id"])
+        if not ch:
+            continue
+        info = _repair_character_audio(ch)
+        results[clip["emotion"]] = info
+        if info:
+            ch["gain_ramp_fixed"] = info
+            if clip.get("quality"):
+                clip["quality"]["gain_ramp_fixed"] = info
+    _write_json(CHARACTERS_JSON, chars)
+    _save_profile(profile)
+    return {"repaired": results, "profiles": _profiles_with_clips()}
 
 
 @app.post("/api/profiles/{profile_id}/clips/link", tags=["Clone Studio"])
