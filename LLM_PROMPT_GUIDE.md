@@ -76,6 +76,7 @@ To generate a complete multi-character game skit in a single call, send `POST ht
 - **Inline Stage Directions in `script_text`**:
   - `Speaker (voice description for new character) [temp 0.45, top_p 0.80, seed 42, overlap 200ms]: Dialogue text`
   - `Speaker [ref: /path/to/audio.wav]: Dialogue text using cloned voice from recording`
+  - `Speaker [blend: Speaker (Sad)]: Dialogue` — emotion blend: joins a second clip of the same person onto the voice's reference so the read lands between the two emotions. Add `strong` (`[blend: Speaker (Sad) strong]`) to let the blend clip lead. Also `blend_with` / `blend_strength` on `lines` and `/api/synthesize`.
   - Standalone timing lines between turns:
     - `[Pause: 450ms]` or `[pause 1.5s]` — adds a dramatic silence beat after the previous line.
     - `[Overlap: 220ms]` — makes the next speaker interrupt 220ms *before* the previous line finishes!

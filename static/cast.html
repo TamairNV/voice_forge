@@ -146,6 +146,8 @@
     @media (max-width: 1100px) { .line-row { grid-template-columns: 24px 1fr auto; } .line-row .line-text { grid-column: 1 / -1; } .line-row .line-variant { grid-column: 2 / 3; } }
     .line-idx { color: var(--text-dim); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
     .line-row select, .line-row input { padding: 6px 8px; font-size: 12px; }
+    .blend-row { grid-column: 3 / -1; display: flex; gap: 6px; align-items: center; font-size: 12px; }
+    .blend-row select { max-width: 260px; }
     .direction { font-size: 10.5px; color: #fcd34d; }
 
     .result { display: flex; flex-direction: column; gap: 10px; }
@@ -834,11 +836,18 @@
           </div>
           <select class="line-variant" title="Use a different voice for just this line" onchange="state.lines[${i}].variantId = this.value; state.lines[${i}].variantManual = true; state.lines[${i}].profileEmotion = ''">${voiceOptions(l.variantId, false, '↳ cast voice', castByKey(l.speaker) ? castByKey(l.speaker).name : '')}</select>
           <span class="row tight">
+            <button class="btn-sm ${l.blendId ? 'hit-on' : ''}" title="Blend with another emotion clip of the same person, so the line lands between the two (e.g. angry + sad)" onclick="state.lines[${i}].blendOpen = !state.lines[${i}].blendOpen; renderLines()">🎚</button>
             <button class="btn-sm ${hitsHard(l) ? 'hit-on' : ''}" title="Hit hard: don't carry the previous line's mood into this one (good for sudden shouts). Auto-on for shouting lines." onclick="toggleHitHard(${i})">⚡</button>
             <button class="btn-sm" title="Hear just this line in its voice" onclick="previewLine(${i}, this)">▶</button>
             <button class="btn-sm" title="Move up" onclick="moveLine(${i}, -1)">↑</button>
             <button class="btn-sm rose" title="Delete line" onclick="state.lines.splice(${i}, 1); renderAll()">✕</button>
           </span>
+          ${l.blendOpen || l.blendId ? `<div class="blend-row"><span class="dim">🎚 Blend with</span>
+            <select onchange="state.lines[${i}].blendId = this.value; state.lines[${i}].preview = null; renderLines()">${voiceOptions(l.blendId || '', false, '— no blend —', castByKey(l.speaker) ? castByKey(l.speaker).name : '')}</select>
+            <select title="Subtle keeps this line's own emotion in front. Strong lets the blend clip lead." onchange="state.lines[${i}].blendStrength = this.value; state.lines[${i}].preview = null">
+              <option value="subtle" ${(l.blendStrength || 'subtle') === 'subtle' ? 'selected' : ''}>a touch</option>
+              <option value="strong" ${l.blendStrength === 'strong' ? 'selected' : ''}>mostly blend</option>
+            </select></div>` : ''}
         </div>`).join('');
       updateRenderHint();
     }
@@ -848,14 +857,15 @@
       const voiceId = l.variantId || (c && c.voiceId);
       if (!voiceId || !voiceById(voiceId)) { toast('Give this character a voice first.'); return; }
       if (!l.text.trim()) return;
-      const key = voiceId + '|' + l.text.trim() + '|' + tempValue();
+      const key = voiceId + '|' + l.text.trim() + '|' + tempValue() + '|' + (l.blendId || '') + (l.blendStrength || '');
       if (l.preview && l.preview.key === key) { play(l.preview.url); return; }
       btn.innerHTML = '<span class="spinner"></span>'; btn.disabled = true;
       setTts(true, 'Line ' + (i + 1));
       try {
         const d = await api('/api/synthesize', {
           method: 'POST',
-          body: JSON.stringify({ model_id: 'qwen3_clone', character_id: voiceId, text: l.text.trim(), temperature: tempValue() }),
+          body: JSON.stringify({ model_id: 'qwen3_clone', character_id: voiceId, text: l.text.trim(), temperature: tempValue(),
+            ...(l.blendId && voiceById(l.blendId) ? { blend_with: l.blendId, blend_strength: l.blendStrength || 'subtle' } : {}) }),
         });
         l.preview = { key, url: d.take.url };
         play(d.take.url);
@@ -918,6 +928,7 @@
         const item = { speaker, text: l.text.trim(), context_reset: hitsHard(l) };
         // One person's emotion clips chain into each other so emotion shifts carry over gradually
         if (c.profileId) item.continuity_group = c.name;
+        if (l.blendId && voiceById(l.blendId)) { item.blend_with = l.blendId; item.blend_strength = l.blendStrength || 'subtle'; }
         lines.push(item);
       });
       // A line whose direction says it interrupts cuts into the line before it
@@ -1151,7 +1162,7 @@ MARK: ...Dav from upstairs?`;
           title: $('sceneTitle').value,
           cast: state.cast.map(c => ({ key: c.key, scriptName: c.scriptName, name: c.name, description: c.description, voiceId: c.voiceId, profileId: c.profileId || '',
             newVoice: { open: c.newVoice.open, description: c.newVoice.description, sample: c.newVoice.sample } })),
-          lines: state.lines.map(l => ({ speaker: l.speaker, text: l.text, direction: l.direction, emotion: l.emotion || '', variantId: l.variantId, variantManual: !!l.variantManual, profileEmotion: l.profileEmotion || '', hitHard: l.hitHard })),
+          lines: state.lines.map(l => ({ speaker: l.speaker, text: l.text, direction: l.direction, emotion: l.emotion || '', variantId: l.variantId, variantManual: !!l.variantManual, profileEmotion: l.profileEmotion || '', hitHard: l.hitHard, blendId: l.blendId || '', blendStrength: l.blendStrength || '' })),
           temperature: rawTemp(),
           pause: $('pauseMs').value,
           continuity: $('continuity').checked,
@@ -1169,7 +1180,7 @@ MARK: ...Dav from upstairs?`;
       $('sceneTitle').value = d.title || ''; $('sceneTitle').dataset.auto = '0';
       state.cast = (d.cast || []).map(c => ({ ...c, voiceId: voiceById(c.voiceId) ? c.voiceId : '',
         newVoice: { ...newVoiceState(c.newVoice.open || !voiceById(c.voiceId), c.newVoice.description), sample: c.newVoice.sample || '' } }));
-      state.lines = (d.lines || []).map(l => ({ ...l, variantId: voiceById(l.variantId) ? l.variantId : '' }));
+      state.lines = (d.lines || []).map(l => ({ ...l, variantId: voiceById(l.variantId) ? l.variantId : '', blendId: voiceById(l.blendId) ? l.blendId : '' }));
       state.cast.forEach(c => { if (c.profileId && !profileById(c.profileId)) c.profileId = ''; });
       applyAllProfiles();
       if (d.temperature !== null && d.temperature !== undefined) { $('tempAuto').checked = false; $('tempSlider').value = d.temperature; }

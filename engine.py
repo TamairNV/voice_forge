@@ -14,7 +14,7 @@ import tempfile
 import time
 import threading
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Union
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -827,6 +827,47 @@ def _install_qwen3_timbre_lock(model: Any) -> None:
     talker._timbre_lock_installed = True
 
 
+# Longest two-clip blend reference fed to ICL. Longer references slow generation and raise runaway risk.
+BLEND_MAX_TOTAL_SEC = 24.0
+
+
+def _build_blended_golden(
+    golden_audio_path: Optional[str],
+    golden_text: Optional[str],
+    blend_audio_path: Optional[str],
+    blend_text: Optional[str],
+    strength: str = "subtle",
+    sample_rate: int = 24000,
+    max_total_sec: float = BLEND_MAX_TOTAL_SEC,
+) -> Tuple[Optional[np.ndarray], Optional[str], bool]:
+    """
+    Joins two reference clips of the same person (e.g. their Angry and Sad clips) into one ICL reference,
+    so the line lands somewhere between the two emotions. The clip heard LAST pulls hardest (A/B test),
+    so "subtle" puts the blend clip first and the line's own voice last; "strong" flips that.
+    Returns (audio, text, blended). Falls back to the golden clip alone when the blend is missing or too long.
+    """
+    if not golden_audio_path or not golden_text or not Path(golden_audio_path).exists():
+        return None, None, False
+    g_wav = _read_mono(golden_audio_path)
+    if not blend_audio_path or not blend_text or not Path(blend_audio_path).exists() \
+            or Path(blend_audio_path).resolve() == Path(golden_audio_path).resolve():
+        return g_wav, golden_text.strip(), False
+    b_wav = _read_mono(blend_audio_path)
+    if g_wav.shape[0] + b_wav.shape[0] > int(max_total_sec * sample_rate):
+        return g_wav, golden_text.strip(), False
+    gap = np.zeros(int(0.25 * sample_rate), dtype=np.float32)
+    if strength == "strong":
+        parts, texts = [g_wav, gap, b_wav], [golden_text, blend_text]
+    else:
+        parts, texts = [b_wav, gap, g_wav], [blend_text, golden_text]
+    return np.concatenate(parts).astype(np.float32), " ".join(t.strip() for t in texts), True
+
+
+def _read_mono(path: Union[str, Path]) -> np.ndarray:
+    wav, _ = sf.read(str(path), dtype="float32")
+    return wav.mean(axis=1) if wav.ndim > 1 else wav
+
+
 def _build_rolling_context_reference(
     golden_audio_path: Optional[str],
     golden_text: Optional[str],
@@ -835,6 +876,7 @@ def _build_rolling_context_reference(
     sample_rate: int = 24000,
     max_prev_sec: float = 8.0,
     max_total_sec: float = 18.0,
+    golden_audio_np: Optional[np.ndarray] = None,
 ) -> Tuple[Optional[mx.array], Optional[str], Optional[np.ndarray]]:
     """
     Builds a Hybrid Context-Aware Reference `(ref_audio_mx, combined_ref_text, ref_audio_np)` that combines:
@@ -845,12 +887,12 @@ def _build_rolling_context_reference(
     what the character just said in Line N-1 before speaking Line N, creating seamless conversational
     prosody, pitch continuity, and emotional momentum!
     """
-    if not golden_audio_path or not golden_text or not Path(golden_audio_path).exists():
+    if golden_audio_np is None and (not golden_audio_path or not golden_text or not Path(golden_audio_path).exists()):
+        return None, None, None
+    if not golden_text:
         return None, None, None
 
-    g_wav, g_sr = sf.read(golden_audio_path, dtype="float32")
-    if g_wav.ndim > 1:
-        g_wav = g_wav.mean(axis=1)
+    g_wav = golden_audio_np if golden_audio_np is not None else _read_mono(golden_audio_path)
     g_text = golden_text.strip()
 
     if not prev_audio_path or not prev_text or not Path(prev_audio_path).exists():
@@ -1023,6 +1065,9 @@ class VoiceForgeEngine:
         prev_audio_path: Optional[str] = None,
         prev_text: Optional[str] = None,
         dynamic_temperature: bool = True,
+        blend_audio_path: Optional[str] = None,
+        blend_text: Optional[str] = None,
+        blend_strength: str = "subtle",
     ) -> Tuple[np.ndarray, int, Dict[str, Any]]:
         # Ensure requested model is active
         if self.active_model_id != model_id or self.active_model is None:
@@ -1051,12 +1096,23 @@ class VoiceForgeEngine:
             if prev_text:
                 clean_prev_text, _ = sanitize_dialogue_for_model(prev_text, model_id="qwen3_clone")
 
+            # Optional emotion blend: a second clip of the same person joined onto the golden reference
+            blended_np, blended_text, used_blend = None, None, False
+            if blend_audio_path and blend_text and info["family"] != "maya1":
+                clean_blend_text, _ = sanitize_dialogue_for_model(blend_text, model_id="qwen3_clone")
+                blended_np, blended_text, used_blend = _build_blended_golden(
+                    ref_audio_path, clean_ref_text, blend_audio_path, clean_blend_text, strength=blend_strength,
+                )
+            if used_blend:
+                clean_ref_text = blended_text
+
             ref_audio_mx, combined_ref_text, ref_audio_np = _build_rolling_context_reference(
                 golden_audio_path=ref_audio_path,
                 golden_text=clean_ref_text,
                 prev_audio_path=prev_audio_path,
                 prev_text=clean_prev_text,
                 sample_rate=24000,
+                golden_audio_np=blended_np if used_blend else None,
             )
             used_prev_context = bool(
                 prev_audio_path and clean_prev_text and ref_audio_mx is not None
@@ -1140,7 +1196,8 @@ class VoiceForgeEngine:
                     raise ValueError("Voice Lock / Clone mode requires selecting a saved character voice (reference audio + transcript).")
                 effective_ref_audio = ref_audio_mx if ref_audio_mx is not None else ref_audio_path
                 effective_ref_text = combined_ref_text if combined_ref_text else clean_ref_text
-                golden_audio = load_audio(ref_audio_path, sample_rate=self.active_model.sample_rate)
+                # Retries and later chunks re-anchor on this; with a blend it is the blended reference
+                golden_audio = mx.array(blended_np, dtype=mx.float32) if used_blend else load_audio(ref_audio_path, sample_rate=self.active_model.sample_rate)
 
                 def _icl(spec, chunk_text):
                     # Calls the ICL generator directly: model.generate() silently raises the repetition
@@ -1212,6 +1269,8 @@ class VoiceForgeEngine:
                 "chunks": len(results),
                 "rvq_timbre_locked": bool(getattr(self.active_model, "_lock_rvq_timbre", False)),
                 "context_chained": used_prev_context,
+                "blended": used_blend,
+                "blend_strength": blend_strength if used_blend else None,
                 "compiled_instruct": compiled_instruct,
                 "peak_memory_gb": round(mx.get_peak_memory() / 1e9, 2),
             }

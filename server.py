@@ -40,6 +40,7 @@ from engine import (
     compile_voice_instruct,
     sanitize_dialogue_for_model,
     optimize_character_prompts,
+    _emotion_temperature_boost,
 )
 
 BASE_DIR = Path(__file__).parent.resolve()
@@ -211,6 +212,14 @@ class SynthesizeRequest(BaseModel):
         None,
         description="Optional transcript of the preceding line for context chaining.",
     )
+    blend_with: Optional[str] = Field(
+        None,
+        description="Emotion blend: ID or name of a second voice of the same person (e.g. 'Tamair (Sad)'). Its clip is joined onto this voice's reference so the read lands between the two emotions. Qwen3 clone only.",
+    )
+    blend_strength: str = Field(
+        "subtle",
+        description="'subtle' keeps this voice's emotion in front (blend clip heard first); 'strong' lets the blend clip lead (heard last, which pulls hardest).",
+    )
 
 
 class DesignAndLockRequest(BaseModel):
@@ -328,6 +337,14 @@ class SceneLineItem(BaseModel):
         None,
         description="Optional exact spoken transcript for `ref_audio_path`. If omitted, automatically transcribed via on-device Whisper.",
     )
+    blend_with: Optional[str] = Field(
+        None,
+        description="Emotion blend: ID or name of a second voice of the same person (e.g. 'Tamair (Sad)'). Its clip is joined onto this voice's reference so the read lands between the two emotions. Qwen3 clone only.",
+    )
+    blend_strength: str = Field(
+        "subtle",
+        description="'subtle' keeps this voice's emotion in front (blend clip heard first); 'strong' lets the blend clip lead (heard last, which pulls hardest).",
+    )
 
 
 class RerollSceneLineRequest(BaseModel):
@@ -342,6 +359,8 @@ class RerollSceneLineRequest(BaseModel):
     top_p: Optional[float] = Field(None, description="Optional nucleus sampling top_p override.")
     repetition_penalty: Optional[float] = Field(None, description="Optional repetition penalty override.")
     seed: Optional[int] = Field(None, description="Optional random seed override (pass a new integer to force a different vocal inflection take).")
+    blend_with: Optional[str] = Field(None, description="Emotion blend voice for this line. Omit to keep the line's current blend; pass '' to remove it.")
+    blend_strength: Optional[str] = Field(None, description="'subtle' or 'strong'. Omit to keep the current setting.")
 
 
 class SceneRenderRequest(BaseModel):
@@ -607,6 +626,18 @@ def _run_synthesis_and_save(req: SynthesizeRequest) -> dict:
             detail="Please provide `character_id` (or character name) from `/api/characters` when using `qwen3_clone`.",
         )
 
+    blend_audio_path = None
+    blend_text = None
+    blend_name = None
+    if req.blend_with:
+        bchar = _resolve_character(req.blend_with)
+        if not bchar:
+            raise HTTPException(status_code=404, detail=f"Blend voice '{req.blend_with}' not found in the Voice Library.")
+        if bchar["id"] != resolved_char_id:
+            blend_audio_path = str(CHARACTERS_DIR / bchar["audio_file"])
+            blend_text = bchar.get("ref_text")
+            blend_name = bchar["name"]
+
     prev_audio_path = req.prev_audio_path
     prev_text = req.prev_text
     if req.prev_take_id and not prev_audio_path:
@@ -633,6 +664,9 @@ def _run_synthesis_and_save(req: SynthesizeRequest) -> dict:
             prev_audio_path=prev_audio_path,
             prev_text=prev_text,
             dynamic_temperature=req.dynamic_temperature,
+            blend_audio_path=blend_audio_path,
+            blend_text=blend_text,
+            blend_strength="strong" if req.blend_strength == "strong" else "subtle",
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -655,6 +689,7 @@ def _run_synthesis_and_save(req: SynthesizeRequest) -> dict:
         "character_name": character_name,
         "sample_rate": sr,
         "metrics": metrics,
+        "blend_with": blend_name if metrics.get("blended") else None,
         "created_at": time.strftime("%H:%M:%S"),
     }
 
@@ -1210,6 +1245,21 @@ def _parse_script_text_to_lines(script_text: str) -> List[SceneLineItem]:
             instruct = (m.group(2) or "").strip() or None
             directives = (m.group(3) or "").strip().lower()
             dialogue = m.group(4).strip().strip('"')
+            raw_directives = (m.group(3) or "").strip()
+
+            # `[blend: Tamair (Sad)]` or `[blend: Tamair (Sad) strong]`: mix in a second emotion clip
+            blend_with = None
+            blend_strength = "subtle"
+            bl_m = re.search(r"blend\s*(?:with)?\s*[:=]\s*([^,\]]+)", raw_directives, re.IGNORECASE)
+            if bl_m:
+                bl = bl_m.group(1).strip()
+                st_m = re.search(r"\s+(strong|subtle)$", bl, re.IGNORECASE)
+                if st_m:
+                    blend_strength = st_m.group(1).lower()
+                    bl = bl[: st_m.start()].strip()
+                blend_with = bl or None
+                # Keep the voice name out of the other directives ("Clone", "Fast"... in a name)
+                directives = re.sub(r"blend\s*(?:with)?\s*[:=]\s*[^,\]]+", "", directives, flags=re.IGNORECASE)
 
             model_id = None
             speed = None
@@ -1284,6 +1334,8 @@ def _parse_script_text_to_lines(script_text: str) -> List[SceneLineItem]:
                         pause_after_ms=pause_after_ms,
                         ref_audio_path=ref_audio_path,
                         ref_text=ref_text,
+                        blend_with=blend_with,
+                        blend_strength=blend_strength,
                     )
                 )
 
@@ -1315,8 +1367,36 @@ LINE_TARGET_DBFS = -20.0   # speech level every line is pulled towards
 LINE_LEVEL_KEEP = 0.15     # fraction of a line's own loudness difference kept, so whispers stay a bit quieter
 
 
-def _level_line(audio: np.ndarray, sample_rate: int) -> np.ndarray:
-    """Pull a line's speech loudness towards a common target so volume doesn't jump between takes."""
+# Natural dynamics: a whisper sits under a normal line and a shout sits above it, the way a real
+# recording (or ElevenLabs output) keeps them, instead of every line being flattened to one level.
+_LEVEL_OFFSETS_DB = [
+    (("whisper", "hushed", "murmur"), -7.0),
+    (("shout", "scream", "yell", "furious", "rage"), 3.0),
+    (("angry", "excited", "panick", "frantic", "thrilled"), 1.5),
+    (("sad", "tired", "scared", "afraid", "nervous", "sorrow", "quiet", "soft"), -2.0),
+]
+
+
+def _emotion_level_offset_db(seg: dict) -> float:
+    """dB offset from the line's emotion label (e.g. 'Tamair (Whispering)') and how its text reads."""
+    # Only the emotion part of the label counts ("Tamair (Sad)"), so a name like "Sadie" doesn't
+    label = " ".join(re.findall(r"\(([^)]*)\)", seg.get("speaker", "")) + [seg.get("emotion") or ""]).lower()
+    for words, db in _LEVEL_OFFSETS_DB:
+        if re.search(r"\b(?:" + "|".join(words) + ")", label):
+            return db
+    text = re.sub(r"<[^>]+>", "", seg.get("text", ""))
+    letters = [c for c in text if c.isalpha()]
+    if len(letters) >= 4 and sum(c.isupper() for c in letters) / len(letters) > 0.7:
+        return 3.0  # ALL CAPS reads as shouted
+    if text.count("!") >= 2:
+        return 1.5
+    if text.strip().endswith(("...", "…")) and "!" not in text:
+        return -1.0  # trailing off
+    return 0.0
+
+
+def _level_line(audio: np.ndarray, sample_rate: int, offset_db: float = 0.0) -> np.ndarray:
+    """Pull a line's speech loudness towards a common target (plus an emotion offset) so volume doesn't jump between takes."""
     if audio.size == 0:
         return audio
     hop = max(1, int(sample_rate * 0.02))
@@ -1327,7 +1407,7 @@ def _level_line(audio: np.ndarray, sample_rate: int) -> np.ndarray:
     level_db = 20 * np.log10(float(np.percentile(rms, 90)) + 1e-9)
     if level_db < -60:
         return audio
-    gain_db = float(np.clip((LINE_TARGET_DBFS - level_db) * (1 - LINE_LEVEL_KEEP), -15.0, 15.0))
+    gain_db = float(np.clip((LINE_TARGET_DBFS + offset_db - level_db) * (1 - LINE_LEVEL_KEEP), -15.0, 15.0))
     peak = float(np.max(np.abs(audio)))
     max_gain_db = 20 * np.log10(0.95 / peak) if peak > 0 else gain_db
     return (audio * 10 ** (min(gain_db, max_gain_db) / 20)).astype(np.float32)
@@ -1378,7 +1458,7 @@ def _mix_segments_into_master(segment_records: List[dict], sample_rate: int = 24
         if trim_edges:
             audio = _trim_edges(audio, sample_rate)
         if level_lines:
-            audio = _level_line(audio, sample_rate)
+            audio = _level_line(audio, sample_rate, _emotion_level_offset_db(seg))
 
         start_sample = max(0, cursor_samples)
         end_sample = start_sample + audio.shape[0]
@@ -1497,8 +1577,16 @@ def _score_take(take: dict, text: str, char: dict) -> Tuple[float, dict]:
     ref_hz, hz = _ref_pitch(char), float(take["metrics"].get("pitch_hz_median", 0.0) or 0.0)
     # Pitch only counts once it drifts >~10% from the reference clip, and never outweighs getting the words right
     pitch_penalty = max(0.0, abs(np.log2(hz / ref_hz)) - 0.15) * 0.4 if ref_hz > 0 and hz > 0 else 0.0
-    score = 2.0 * match - length_penalty - pitch_penalty
-    return score, {"match": round(match, 2), "ms_per_char": round(ms_per_char), "pitch_hz": round(hz), "score": round(score, 3)}
+    # Liveliness: among takes that say the words right, prefer the one whose pitch actually moves.
+    # Flat, monotone reads are the main thing that separates local TTS from ElevenLabs-style output.
+    span = float(take["metrics"].get("pitch_semitone_span", 0.0) or 0.0)
+    emotional = _emotion_temperature_boost(text) >= 0.05
+    expressive_bonus = (0.3 if emotional else 0.12) * min(span, 14.0) / 14.0
+    if span < 2.5 and len(want) >= 4:
+        expressive_bonus -= 0.15  # monotone
+    score = 2.0 * match - length_penalty - pitch_penalty + expressive_bonus
+    return score, {"match": round(match, 2), "ms_per_char": round(ms_per_char), "pitch_hz": round(hz),
+                   "pitch_span": round(span, 1), "score": round(score, 3)}
 
 
 def _pick_best_take(candidates: List[dict], text: str, char: dict) -> dict:
@@ -1801,6 +1889,8 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
                         seed=line_seed if n_takes == 1 else random.randint(1, 2**31 - 1),
                         prev_audio_path=prev_audio_path,
                         prev_text=prev_text,
+                        blend_with=line.blend_with,
+                        blend_strength=line.blend_strength,
                     )
                 ))
             take = _pick_best_take(candidates, line.text, existing_char) if len(candidates) > 1 else candidates[0]
@@ -1874,6 +1964,8 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
             "model_id": take["model_id"],
             "action": action,
             "context_chained": bool(take["metrics"].get("context_chained", False)),
+            "blend_with": line.blend_with if take["metrics"].get("blended") else None,
+            "blend_strength": line.blend_strength if take["metrics"].get("blended") else None,
             "text": line.text.strip(),
             "instruct": instruct_used,
             "speed": line_speed,
@@ -2009,8 +2101,12 @@ def api_reroll_scene_line(scene_id: str, req: RerollSceneLineRequest):
         # sample the exact same take again.
         seed=req.seed if req.seed is not None else random.randint(1, 2**31 - 1),
         prev_take_id=prev_take_id,
+        blend_with=(req.blend_with if req.blend_with is not None else target_seg.get("blend_with")) or None if model_id == "qwen3_clone" else None,
+        blend_strength=req.blend_strength or target_seg.get("blend_strength") or "subtle",
     )
     new_take = _run_synthesis_and_save(synth_req)
+    target_seg["blend_with"] = new_take.get("blend_with")
+    target_seg["blend_strength"] = synth_req.blend_strength if new_take.get("blend_with") else None
 
     target_seg["text"] = new_text
     target_seg["instruct"] = instruct
