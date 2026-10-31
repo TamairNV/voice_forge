@@ -28,6 +28,49 @@ from mlx_audio.lm.generate import stream_generate
 from mlx_audio.lm.models.llama import Model as LlamaModel, ModelArgs as LlamaModelConfig
 from mlx_audio.lm.sample_utils import make_logits_processors, make_sampler
 from mlx_audio.utils import get_model_path, load_audio, load_config, load_weights, apply_quantization, from_dict
+import os
+
+
+# ---------------------------------------------------------------------------
+# Memory policy
+# MLX keeps freed Metal buffers in a cache for reuse, and by default that cache may grow to roughly
+# the whole memory limit. During long renders (best-of-N takes, rolling context references of
+# varying lengths) almost every step allocates a differently sized buffer, so the cache kept growing
+# and the studio process ballooned to tens of GB while only ~4-6 GB was actually in use.
+# Capping the cache keeps reuse for the hot path without the unbounded growth.
+MLX_CACHE_LIMIT_GB = float(os.environ.get("VOICEFORGE_MLX_CACHE_GB", "2"))
+# Free the model (and Whisper) after this many idle minutes; 0 disables. Reloading takes a few seconds.
+IDLE_UNLOAD_MINUTES = float(os.environ.get("VOICEFORGE_IDLE_UNLOAD_MIN", "15"))
+
+
+def _mx_call(name: str, *args):
+    """Calls mx.<name>, falling back to the older mx.metal.<name> spelling."""
+    fn = getattr(mx, name, None) or getattr(getattr(mx, "metal", None), name, None)
+    return fn(*args) if fn else None
+
+
+_mx_call("set_cache_limit", int(MLX_CACHE_LIMIT_GB * 1024 ** 3))
+
+
+def memory_snapshot() -> Dict[str, float]:
+    """Active (live arrays), cache (freed but held) and peak Metal memory in GB, plus process RSS."""
+    snap = {
+        "active_memory_gb": round((_mx_call("get_active_memory") or 0) / 1e9, 2),
+        "cache_memory_gb": round((_mx_call("get_cache_memory") or 0) / 1e9, 2),
+        "peak_memory_gb": round((_mx_call("get_peak_memory") or 0) / 1e9, 2),
+    }
+    try:
+        import resource
+        # ru_maxrss is bytes on macOS (KB on Linux); this is the high-water mark, not current RSS
+        snap["process_peak_rss_gb"] = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e9, 2)
+    except Exception:
+        pass
+    return snap
+
+
+def release_memory() -> None:
+    gc.collect()
+    _mx_call("clear_cache")
 
 
 def normalize_studio_loudness(
@@ -993,22 +1036,60 @@ class VoiceForgeEngine:
     """Thread-safe model manager that hot-swaps between Qwen3-TTS and Maya-1 on Apple Silicon."""
 
     def __init__(self):
-        self._lock = threading.Lock()
+        # Re-entrant so synthesize() can swap models inside the same lock (no other request can sneak
+        # a different model in between the swap and the generation).
+        self._lock = threading.RLock()
         self.active_model_id: Optional[str] = None
         self.active_model: Any = None
         self.loading_model_id: Optional[str] = None
         self.status_message: str = "Ready to load model"
+        self.last_used = time.time()
+        # Extra things to free on idle (e.g. the server's Whisper model)
+        self.idle_release_hooks: List[Any] = []
+        if IDLE_UNLOAD_MINUTES > 0:
+            threading.Thread(target=self._idle_watchdog, daemon=True, name="voiceforge-idle-unload").start()
 
     def get_status(self) -> Dict[str, Any]:
         return {
             "active_model_id": self.active_model_id,
             "loading_model_id": self.loading_model_id,
             "status_message": self.status_message,
-            "active_memory_gb": round(mx.get_active_memory() / 1e9, 2),
-            "peak_memory_gb": round(mx.get_peak_memory() / 1e9, 2),
+            **memory_snapshot(),
+            "mlx_cache_limit_gb": MLX_CACHE_LIMIT_GB,
+            "idle_unload_minutes": IDLE_UNLOAD_MINUTES,
             "models": list(MODEL_REGISTRY.values()),
             "maya1_tags": MAYA1_EMOTION_TAGS,
         }
+
+    def unload(self, reason: str = "manual") -> Dict[str, Any]:
+        """Drops the active model and any idle hooks (Whisper) and hands the memory back to macOS."""
+        with self._lock:
+            if self.active_model is not None:
+                del self.active_model
+                self.active_model = None
+                self.active_model_id = None
+            for hook in self.idle_release_hooks:
+                try:
+                    hook()
+                except Exception:
+                    pass
+            release_memory()
+            self.status_message = f"Model unloaded ({reason})"
+            return self.get_status()
+
+    def _idle_watchdog(self) -> None:
+        while True:
+            time.sleep(30)
+            idle_min = (time.time() - self.last_used) / 60
+            if self.active_model is not None and idle_min >= IDLE_UNLOAD_MINUTES:
+                # Non-blocking: if a render holds the lock it isn't idle anyway
+                if self._lock.acquire(blocking=False):
+                    try:
+                        if (time.time() - self.last_used) / 60 >= IDLE_UNLOAD_MINUTES:
+                            self.unload(reason=f"idle {IDLE_UNLOAD_MINUTES:g} min")
+                            print(f"[voiceforge] unloaded model after {IDLE_UNLOAD_MINUTES:g} idle minutes", flush=True)
+                    finally:
+                        self._lock.release()
 
     def load_model(self, model_id: str) -> Dict[str, Any]:
         if model_id not in MODEL_REGISTRY:
@@ -1028,8 +1109,7 @@ class VoiceForgeEngine:
                     del self.active_model
                     self.active_model = None
                     self.active_model_id = None
-                    gc.collect()
-                    mx.clear_cache()
+                    release_memory()
 
                 t0 = time.perf_counter()
                 if info["family"] == "maya1":
@@ -1039,6 +1119,7 @@ class VoiceForgeEngine:
                     _install_qwen3_timbre_lock(self.active_model)
 
                 load_sec = time.perf_counter() - t0
+                self.last_used = time.time()
                 self.active_model_id = model_id
                 self.loading_model_id = None
                 self.status_message = f"Loaded {info['name']} in {load_sec:.1f}s"
@@ -1069,210 +1150,226 @@ class VoiceForgeEngine:
         blend_text: Optional[str] = None,
         blend_strength: str = "subtle",
     ) -> Tuple[np.ndarray, int, Dict[str, Any]]:
-        # Ensure requested model is active
-        if self.active_model_id != model_id or self.active_model is None:
-            self.load_model(model_id)
-
         with self._lock:
-            info = MODEL_REGISTRY[model_id]
-            t0 = time.perf_counter()
-
-            # Clean spoken text ("for the ear, not the eye") and compile model-specific instruct prompt
-            clean_text, extracted_tags = sanitize_dialogue_for_model(text, model_id=model_id)
-            compiled_instruct = compile_voice_instruct(instruct, model_id=model_id, extracted_tags=extracted_tags)
-
-            # Set deterministic MLX random seed if provided or if locking to a reference character
-            effective_seed = seed
-            if effective_seed is None and ref_audio_path:
-                effective_seed = _derive_deterministic_seed(str(ref_audio_path))
-            if effective_seed is not None:
-                mx.random.seed(int(effective_seed))
-
-            # Build Hybrid Context-Aware Reference (Golden Anchor + Previous Line Audio/Text) when available!
-            clean_ref_text = None
-            if ref_text:
-                clean_ref_text, _ = sanitize_dialogue_for_model(ref_text, model_id="qwen3_clone")
-            clean_prev_text = None
-            if prev_text:
-                clean_prev_text, _ = sanitize_dialogue_for_model(prev_text, model_id="qwen3_clone")
-
-            # Optional emotion blend: a second clip of the same person joined onto the golden reference
-            blended_np, blended_text, used_blend = None, None, False
-            if blend_audio_path and blend_text and info["family"] != "maya1":
-                clean_blend_text, _ = sanitize_dialogue_for_model(blend_text, model_id="qwen3_clone")
-                blended_np, blended_text, used_blend = _build_blended_golden(
-                    ref_audio_path, clean_ref_text, blend_audio_path, clean_blend_text, strength=blend_strength,
+            # Swap inside the lock so a concurrent request can't change the model under us
+            if self.active_model_id != model_id or self.active_model is None:
+                self.load_model(model_id)
+            _mx_call("reset_peak_memory")
+            try:
+                return self._synthesize_locked(
+                    model_id, text, instruct, language, speed, trim_silence, temperature, top_p,
+                    repetition_penalty, seed, ref_audio_path, ref_text, prev_audio_path, prev_text,
+                    dynamic_temperature, blend_audio_path, blend_text, blend_strength,
                 )
-            if used_blend:
-                clean_ref_text = blended_text
+            finally:
+                self.last_used = time.time()
+                # Per-line buffers (ref audio, KV cache, decoder activations) are done with; hand them back
+                _mx_call("clear_cache")
 
-            ref_audio_mx, combined_ref_text, ref_audio_np = _build_rolling_context_reference(
-                golden_audio_path=ref_audio_path,
-                golden_text=clean_ref_text,
-                prev_audio_path=prev_audio_path,
-                prev_text=clean_prev_text,
-                sample_rate=24000,
-                golden_audio_np=blended_np if used_blend else None,
-            )
-            used_prev_context = bool(
-                prev_audio_path and clean_prev_text and ref_audio_mx is not None
-                and combined_ref_text and combined_ref_text != clean_ref_text
-            )
+    def _synthesize_locked(
+        self, model_id, text, instruct, language, speed, trim_silence, temperature, top_p,
+        repetition_penalty, seed, ref_audio_path, ref_text, prev_audio_path, prev_text,
+        dynamic_temperature, blend_audio_path, blend_text, blend_strength,
+    ) -> Tuple[np.ndarray, int, Dict[str, Any]]:
+        info = MODEL_REGISTRY[model_id]
+        t0 = time.perf_counter()
 
-            if info["family"] == "maya1":
-                temp = temperature if temperature is not None else 0.42
-                tp = top_p if top_p is not None else 0.88
-                rp = repetition_penalty if repetition_penalty is not None else 1.15
-                # For Maya-1 SNAC prefix, use the immediately preceding line if available (3-5s),
-                # or the Golden Reference if <= 6.5s, so `ref_text` and `ref_audio` stay 100% aligned!
-                maya_ref_src = prev_audio_path if (prev_audio_path and clean_prev_text) else ref_audio_path
-                maya_ref_txt = clean_prev_text if (prev_audio_path and clean_prev_text) else clean_ref_text
-                audio_np, metrics = self.active_model.generate(
+        # Clean spoken text ("for the ear, not the eye") and compile model-specific instruct prompt
+        clean_text, extracted_tags = sanitize_dialogue_for_model(text, model_id=model_id)
+        compiled_instruct = compile_voice_instruct(instruct, model_id=model_id, extracted_tags=extracted_tags)
+
+        # Set deterministic MLX random seed if provided or if locking to a reference character
+        effective_seed = seed
+        if effective_seed is None and ref_audio_path:
+            effective_seed = _derive_deterministic_seed(str(ref_audio_path))
+        if effective_seed is not None:
+            mx.random.seed(int(effective_seed))
+
+        # Build Hybrid Context-Aware Reference (Golden Anchor + Previous Line Audio/Text) when available!
+        clean_ref_text = None
+        if ref_text:
+            clean_ref_text, _ = sanitize_dialogue_for_model(ref_text, model_id="qwen3_clone")
+        clean_prev_text = None
+        if prev_text:
+            clean_prev_text, _ = sanitize_dialogue_for_model(prev_text, model_id="qwen3_clone")
+
+        # Optional emotion blend: a second clip of the same person joined onto the golden reference
+        blended_np, blended_text, used_blend = None, None, False
+        if blend_audio_path and blend_text and info["family"] != "maya1":
+            clean_blend_text, _ = sanitize_dialogue_for_model(blend_text, model_id="qwen3_clone")
+            blended_np, blended_text, used_blend = _build_blended_golden(
+                ref_audio_path, clean_ref_text, blend_audio_path, clean_blend_text, strength=blend_strength,
+            )
+        if used_blend:
+            clean_ref_text = blended_text
+
+        ref_audio_mx, combined_ref_text, ref_audio_np = _build_rolling_context_reference(
+            golden_audio_path=ref_audio_path,
+            golden_text=clean_ref_text,
+            prev_audio_path=prev_audio_path,
+            prev_text=clean_prev_text,
+            sample_rate=24000,
+            golden_audio_np=blended_np if used_blend else None,
+        )
+        used_prev_context = bool(
+            prev_audio_path and clean_prev_text and ref_audio_mx is not None
+            and combined_ref_text and combined_ref_text != clean_ref_text
+        )
+
+        if info["family"] == "maya1":
+            temp = temperature if temperature is not None else 0.42
+            tp = top_p if top_p is not None else 0.88
+            rp = repetition_penalty if repetition_penalty is not None else 1.15
+            # For Maya-1 SNAC prefix, use the immediately preceding line if available (3-5s),
+            # or the Golden Reference if <= 6.5s, so `ref_text` and `ref_audio` stay 100% aligned!
+            maya_ref_src = prev_audio_path if (prev_audio_path and clean_prev_text) else ref_audio_path
+            maya_ref_txt = clean_prev_text if (prev_audio_path and clean_prev_text) else clean_ref_text
+            audio_np, metrics = self.active_model.generate(
+                text=clean_text,
+                instruct=compiled_instruct,
+                temperature=temp,
+                top_p=tp,
+                repetition_penalty=rp,
+                ref_audio_path=maya_ref_src,
+                ref_text=maya_ref_txt,
+            )
+            audio_np = apply_studio_pacing(audio_np, 24000, speed=speed, trim_silence=trim_silence)
+            acoustics = analyze_voice_acoustics(audio_np, 24000, clean_text)
+            metrics.update(acoustics)
+            metrics["duration_sec"] = round(audio_np.shape[0] / 24000, 2)
+            metrics["speed"] = round(speed, 2)
+            metrics["temperature"] = round(temp, 2)
+            metrics["top_p"] = round(tp, 2)
+            metrics["seed"] = effective_seed
+            metrics["context_chained"] = used_prev_context
+            metrics["compiled_instruct"] = compiled_instruct
+            return audio_np, 24000, metrics
+
+        # Qwen3-TTS family
+        token_cap = _estimate_max_tokens(clean_text)
+        base_seed = effective_seed if effective_seed is not None else int(time.time() * 1000) & 0x7FFFFFFF
+
+        def _guarded(make_gen, attempt_specs):
+            """Run attempts in order until one finishes under the token cap (a runaway never hits EOS)."""
+            for attempt_idx, spec in enumerate(attempt_specs):
+                mx.random.seed(int(spec["seed"]))
+                out = list(make_gen(spec))
+                if not any(r.token_count >= token_cap for r in out):
+                    return out, attempt_idx
+                print(f"[voiceforge] runaway generation killed at {token_cap} tokens (attempt {attempt_idx + 1}/{len(attempt_specs)}): {clean_text[:50]!r}", flush=True)
+            raise RuntimeError(f"Generation spiralled past the {token_cap}-token limit on every attempt: {clean_text[:60]!r}")
+
+        if info["mode"] == "voice_design":
+            temp = temperature if temperature is not None else QWEN_DESIGN_DEFAULTS["temperature"]
+            temp_boost = _emotion_temperature_boost(text, extracted_tags) if dynamic_temperature else 0.0
+            temp = max(temp, min(temp + temp_boost, EMOTION_TEMP_CEILING["voice_design"])) if temp_boost else temp
+            tp = top_p if top_p is not None else QWEN_DESIGN_DEFAULTS["top_p"]
+            rp = repetition_penalty if repetition_penalty is not None else QWEN_DESIGN_DEFAULTS["repetition_penalty"]
+            self.active_model._lock_rvq_timbre = False
+            if not instruct.strip():
+                raise ValueError("Please provide a character/voice description for Qwen3 VoiceDesign.")
+            # VoiceDesign had no length cap at all, so a runaway ran to 2048 tokens (~160s of babble)
+            # and could get locked into the roster as a character's golden reference.
+            results, _ = _guarded(
+                lambda spec: self.active_model.generate_voice_design(
                     text=clean_text,
                     instruct=compiled_instruct,
+                    language=language,
                     temperature=temp,
                     top_p=tp,
                     repetition_penalty=rp,
-                    ref_audio_path=maya_ref_src,
-                    ref_text=maya_ref_txt,
+                    max_tokens=token_cap,
+                ),
+                [{"seed": base_seed}, {"seed": base_seed + 1}, {"seed": base_seed + 2}],
+            )
+        elif info["mode"] == "voice_clone":
+            temp = temperature if temperature is not None else QWEN_CLONE_DEFAULTS["temperature"]
+            temp_boost = _emotion_temperature_boost(text, extracted_tags) if dynamic_temperature else 0.0
+            temp = max(temp, min(temp + temp_boost, EMOTION_TEMP_CEILING["voice_clone"])) if temp_boost else temp
+            tp = top_p if top_p is not None else QWEN_CLONE_DEFAULTS["top_p"]
+            rp = repetition_penalty if repetition_penalty is not None else QWEN_CLONE_DEFAULTS["repetition_penalty"]
+            self.active_model._lock_rvq_timbre = True
+            if not ref_audio_path or not ref_text:
+                raise ValueError("Voice Lock / Clone mode requires selecting a saved character voice (reference audio + transcript).")
+            effective_ref_audio = ref_audio_mx if ref_audio_mx is not None else ref_audio_path
+            effective_ref_text = combined_ref_text if combined_ref_text else clean_ref_text
+            # Retries and later chunks re-anchor on this; with a blend it is the blended reference
+            golden_audio = mx.array(blended_np, dtype=mx.float32) if used_blend else load_audio(ref_audio_path, sample_rate=self.active_model.sample_rate)
+
+            def _icl(spec, chunk_text):
+                # Calls the ICL generator directly: model.generate() silently raises the repetition
+                # penalty to >= 1.5 for ICL, so the Rep. Penalty slider had no effect in clone mode.
+                return self.active_model._generate_icl(
+                    text=chunk_text,
+                    ref_audio=load_audio(spec["audio"], sample_rate=self.active_model.sample_rate),
+                    ref_text=spec["text"],
+                    language=language,
+                    temperature=temp,
+                    top_p=tp,
+                    repetition_penalty=rp,
+                    max_tokens=token_cap,
                 )
-                audio_np = apply_studio_pacing(audio_np, 24000, speed=speed, trim_silence=trim_silence)
-                acoustics = analyze_voice_acoustics(audio_np, 24000, clean_text)
-                metrics.update(acoustics)
-                metrics["duration_sec"] = round(audio_np.shape[0] / 24000, 2)
-                metrics["speed"] = round(speed, 2)
-                metrics["temperature"] = round(temp, 2)
-                metrics["top_p"] = round(tp, 2)
-                metrics["seed"] = effective_seed
-                metrics["context_chained"] = used_prev_context
-                metrics["compiled_instruct"] = compiled_instruct
-                return audio_np, 24000, metrics
 
-            # Qwen3-TTS family
-            token_cap = _estimate_max_tokens(clean_text)
-            base_seed = effective_seed if effective_seed is not None else int(time.time() * 1000) & 0x7FFFFFFF
+            chunks_text = _split_for_synthesis(clean_text)
+            results = []
+            for chunk_idx, chunk_text in enumerate(chunks_text):
+                token_cap = _estimate_max_tokens(chunk_text)
+                # First chunk uses the chained context; later chunks re-anchor on the golden reference
+                # alone so a long line can't drift away from the character's voice.
+                if chunk_idx == 0:
+                    specs = [
+                        {"audio": effective_ref_audio, "text": effective_ref_text, "seed": base_seed},
+                        {"audio": effective_ref_audio, "text": effective_ref_text, "seed": base_seed + 1},
+                        {"audio": golden_audio, "text": clean_ref_text, "seed": base_seed + 2},
+                    ]
+                else:
+                    specs = [
+                        {"audio": golden_audio, "text": clean_ref_text, "seed": base_seed + 10 * chunk_idx},
+                        {"audio": golden_audio, "text": clean_ref_text, "seed": base_seed + 10 * chunk_idx + 1},
+                    ]
+                chunk_results, attempt_idx = _guarded(lambda spec: _icl(spec, chunk_text), specs)
+                if chunk_idx == 0 and attempt_idx == 2:
+                    used_prev_context = False
+                results.extend(chunk_results)
+        else:
+            raise ValueError(f"Unsupported mode: {info['mode']}")
 
-            def _guarded(make_gen, attempt_specs):
-                """Run attempts in order until one finishes under the token cap (a runaway never hits EOS)."""
-                for attempt_idx, spec in enumerate(attempt_specs):
-                    mx.random.seed(int(spec["seed"]))
-                    out = list(make_gen(spec))
-                    if not any(r.token_count >= token_cap for r in out):
-                        return out, attempt_idx
-                    print(f"[voiceforge] runaway generation killed at {token_cap} tokens (attempt {attempt_idx + 1}/{len(attempt_specs)}): {clean_text[:50]!r}", flush=True)
-                raise RuntimeError(f"Generation spiralled past the {token_cap}-token limit on every attempt: {clean_text[:60]!r}")
+        if not results:
+            raise RuntimeError("Model returned no audio segments.")
 
-            if info["mode"] == "voice_design":
-                temp = temperature if temperature is not None else QWEN_DESIGN_DEFAULTS["temperature"]
-                temp_boost = _emotion_temperature_boost(text, extracted_tags) if dynamic_temperature else 0.0
-                temp = max(temp, min(temp + temp_boost, EMOTION_TEMP_CEILING["voice_design"])) if temp_boost else temp
-                tp = top_p if top_p is not None else QWEN_DESIGN_DEFAULTS["top_p"]
-                rp = repetition_penalty if repetition_penalty is not None else QWEN_DESIGN_DEFAULTS["repetition_penalty"]
-                self.active_model._lock_rvq_timbre = False
-                if not instruct.strip():
-                    raise ValueError("Please provide a character/voice description for Qwen3 VoiceDesign.")
-                # VoiceDesign had no length cap at all, so a runaway ran to 2048 tokens (~160s of babble)
-                # and could get locked into the roster as a character's golden reference.
-                results, _ = _guarded(
-                    lambda spec: self.active_model.generate_voice_design(
-                        text=clean_text,
-                        instruct=compiled_instruct,
-                        language=language,
-                        temperature=temp,
-                        top_p=tp,
-                        repetition_penalty=rp,
-                        max_tokens=token_cap,
-                    ),
-                    [{"seed": base_seed}, {"seed": base_seed + 1}, {"seed": base_seed + 2}],
-                )
-            elif info["mode"] == "voice_clone":
-                temp = temperature if temperature is not None else QWEN_CLONE_DEFAULTS["temperature"]
-                temp_boost = _emotion_temperature_boost(text, extracted_tags) if dynamic_temperature else 0.0
-                temp = max(temp, min(temp + temp_boost, EMOTION_TEMP_CEILING["voice_clone"])) if temp_boost else temp
-                tp = top_p if top_p is not None else QWEN_CLONE_DEFAULTS["top_p"]
-                rp = repetition_penalty if repetition_penalty is not None else QWEN_CLONE_DEFAULTS["repetition_penalty"]
-                self.active_model._lock_rvq_timbre = True
-                if not ref_audio_path or not ref_text:
-                    raise ValueError("Voice Lock / Clone mode requires selecting a saved character voice (reference audio + transcript).")
-                effective_ref_audio = ref_audio_mx if ref_audio_mx is not None else ref_audio_path
-                effective_ref_text = combined_ref_text if combined_ref_text else clean_ref_text
-                # Retries and later chunks re-anchor on this; with a blend it is the blended reference
-                golden_audio = mx.array(blended_np, dtype=mx.float32) if used_blend else load_audio(ref_audio_path, sample_rate=self.active_model.sample_rate)
+        chunks = [np.array(r.audio, dtype=np.float32) for r in results if r.audio is not None]
+        if len(chunks) > 1:
+            gap = np.zeros(int(0.18 * self.active_model.sample_rate), dtype=np.float32)
+            joined = [chunks[0]]
+            for c in chunks[1:]:
+                joined.extend([gap, c])
+            audio_np = np.concatenate(joined, axis=0)
+        else:
+            audio_np = chunks[0]
+        sr = self.active_model.sample_rate
+        audio_np = apply_studio_pacing(audio_np, sr, speed=speed, trim_silence=trim_silence)
+        acoustics = analyze_voice_acoustics(audio_np, sr, clean_text)
+        elapsed = time.perf_counter() - t0
+        duration = audio_np.shape[0] / sr
+        total_tokens = sum(r.token_count for r in results)
 
-                def _icl(spec, chunk_text):
-                    # Calls the ICL generator directly: model.generate() silently raises the repetition
-                    # penalty to >= 1.5 for ICL, so the Rep. Penalty slider had no effect in clone mode.
-                    return self.active_model._generate_icl(
-                        text=chunk_text,
-                        ref_audio=load_audio(spec["audio"], sample_rate=self.active_model.sample_rate),
-                        ref_text=spec["text"],
-                        language=language,
-                        temperature=temp,
-                        top_p=tp,
-                        repetition_penalty=rp,
-                        max_tokens=token_cap,
-                    )
-
-                chunks_text = _split_for_synthesis(clean_text)
-                results = []
-                for chunk_idx, chunk_text in enumerate(chunks_text):
-                    token_cap = _estimate_max_tokens(chunk_text)
-                    # First chunk uses the chained context; later chunks re-anchor on the golden reference
-                    # alone so a long line can't drift away from the character's voice.
-                    if chunk_idx == 0:
-                        specs = [
-                            {"audio": effective_ref_audio, "text": effective_ref_text, "seed": base_seed},
-                            {"audio": effective_ref_audio, "text": effective_ref_text, "seed": base_seed + 1},
-                            {"audio": golden_audio, "text": clean_ref_text, "seed": base_seed + 2},
-                        ]
-                    else:
-                        specs = [
-                            {"audio": golden_audio, "text": clean_ref_text, "seed": base_seed + 10 * chunk_idx},
-                            {"audio": golden_audio, "text": clean_ref_text, "seed": base_seed + 10 * chunk_idx + 1},
-                        ]
-                    chunk_results, attempt_idx = _guarded(lambda spec: _icl(spec, chunk_text), specs)
-                    if chunk_idx == 0 and attempt_idx == 2:
-                        used_prev_context = False
-                    results.extend(chunk_results)
-            else:
-                raise ValueError(f"Unsupported mode: {info['mode']}")
-
-            if not results:
-                raise RuntimeError("Model returned no audio segments.")
-
-            chunks = [np.array(r.audio, dtype=np.float32) for r in results if r.audio is not None]
-            if len(chunks) > 1:
-                gap = np.zeros(int(0.18 * self.active_model.sample_rate), dtype=np.float32)
-                joined = [chunks[0]]
-                for c in chunks[1:]:
-                    joined.extend([gap, c])
-                audio_np = np.concatenate(joined, axis=0)
-            else:
-                audio_np = chunks[0]
-            sr = self.active_model.sample_rate
-            audio_np = apply_studio_pacing(audio_np, sr, speed=speed, trim_silence=trim_silence)
-            acoustics = analyze_voice_acoustics(audio_np, sr, clean_text)
-            elapsed = time.perf_counter() - t0
-            duration = audio_np.shape[0] / sr
-            total_tokens = sum(r.token_count for r in results)
-
-            out_metrics = {
-                "duration_sec": round(duration, 2),
-                "elapsed_sec": round(elapsed, 2),
-                "rtf": round(duration / elapsed, 2) if elapsed > 0 else 0,
-                "tokens": total_tokens,
-                "speed": round(speed, 2),
-                "temperature": round(temp, 2),
-                "temperature_boost": temp_boost,
-                "top_p": round(tp, 2),
-                "seed": base_seed,
-                "chunks": len(results),
-                "rvq_timbre_locked": bool(getattr(self.active_model, "_lock_rvq_timbre", False)),
-                "context_chained": used_prev_context,
-                "blended": used_blend,
-                "blend_strength": blend_strength if used_blend else None,
-                "compiled_instruct": compiled_instruct,
-                "peak_memory_gb": round(mx.get_peak_memory() / 1e9, 2),
-            }
-            out_metrics.update(acoustics)
-            return audio_np, sr, out_metrics
+        out_metrics = {
+            "duration_sec": round(duration, 2),
+            "elapsed_sec": round(elapsed, 2),
+            "rtf": round(duration / elapsed, 2) if elapsed > 0 else 0,
+            "tokens": total_tokens,
+            "speed": round(speed, 2),
+            "temperature": round(temp, 2),
+            "temperature_boost": temp_boost,
+            "top_p": round(tp, 2),
+            "seed": base_seed,
+            "chunks": len(results),
+            "rvq_timbre_locked": bool(getattr(self.active_model, "_lock_rvq_timbre", False)),
+            "context_chained": used_prev_context,
+            "blended": used_blend,
+            "blend_strength": blend_strength if used_blend else None,
+            "compiled_instruct": compiled_instruct,
+            **memory_snapshot(),
+        }
+        out_metrics.update(acoustics)
+        return audio_np, sr, out_metrics

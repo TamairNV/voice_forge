@@ -18,6 +18,7 @@ import random
 import re
 import shutil
 import subprocess
+import threading
 import time
 import uuid
 import zipfile
@@ -580,6 +581,12 @@ def api_load_model(req: LoadModelRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.post("/api/model/unload", tags=["Model Management"])
+def api_unload_model():
+    """Free the active TTS model and Whisper and give the memory back to macOS (next render reloads it)."""
+    return engine.unload(reason="manual")
+
+
 # ============================================================================
 # Speech Synthesis Endpoints (JSON Metadata + Direct WAV File Streaming)
 # ============================================================================
@@ -1050,10 +1057,8 @@ def _ingest_audio_recording(
 
     if not ref_text or not ref_text.strip():
         try:
-            import mlx_audio.stt as stt
-            whisper_model = stt.load_model("mlx-community/whisper-tiny")
-            trans_res = whisper_model.generate(str(dest_path))
-            ref_text = trans_res.text.strip()
+            # Shared cached Whisper (used to load a fresh copy on every recording)
+            ref_text = _transcribe(dest_path)
         except Exception:
             ref_text = "Natural reference recording sample for voice cloning."
 
@@ -2692,14 +2697,25 @@ def api_cast_improve_description(req: CastImproveRequest):
 
 
 _WHISPER_MODEL = None
+_WHISPER_LOCK = threading.Lock()
 
 
 def _transcribe(path: Union[str, Path]) -> str:
     global _WHISPER_MODEL
-    if _WHISPER_MODEL is None:
-        import mlx_audio.stt as stt
-        _WHISPER_MODEL = stt.load_model("mlx-community/whisper-tiny")
-    return _WHISPER_MODEL.generate(str(path)).text.strip()
+    with _WHISPER_LOCK:
+        if _WHISPER_MODEL is None:
+            import mlx_audio.stt as stt
+            _WHISPER_MODEL = stt.load_model("mlx-community/whisper-tiny")
+        return _WHISPER_MODEL.generate(str(path)).text.strip()
+
+
+def _release_whisper() -> None:
+    global _WHISPER_MODEL
+    with _WHISPER_LOCK:
+        _WHISPER_MODEL = None
+
+
+engine.idle_release_hooks.append(_release_whisper)
 
 
 def _norm_words(text: str) -> List[str]:
