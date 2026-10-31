@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scenes · VoiceForge</title>
+  <link rel="stylesheet" href="/static/ui.css" />
+  <style>
+    #scriptInput { min-height: 300px; }
+    .scene { display: flex; flex-direction: column; gap: 10px; }
+    .scene-head { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+    .scene-head b { font-size: 13.5px; }
+    .segs { display: flex; flex-direction: column; gap: 4px; }
+    .seg { display: grid; grid-template-columns: 26px 140px 1fr auto; gap: 8px; align-items: center; padding: 5px 8px; border-radius: 6px; background: var(--field); }
+    .seg .i { color: var(--text-3); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
+    .seg .spk { font-weight: 600; font-size: 12px; }
+    .seg input { padding: 4px 8px; font-size: 12px; background: transparent; border-color: transparent; color: var(--text-2); }
+    .seg input:hover, .seg input:focus { border-color: var(--line-2); color: var(--text); background: var(--field); }
+    @media (max-width: 760px) { .seg { grid-template-columns: 22px 1fr auto; } .seg input { grid-column: 1 / -1; } }
+    .syntax { font-size: 12px; color: var(--text-2); display: flex; flex-direction: column; gap: 4px; }
+    .syntax code { font-size: 11px; }
+  </style>
+</head>
+<body>
+  <header class="page-head">
+    <div>
+      <h1>Scenes</h1>
+      <p>Write a multi-character script and render it to one stitched track, or revisit past scenes.</p>
+    </div>
+    <div class="page-actions">
+      <a class="btn-sm" href="/cast">Use the Casting Desk instead</a>
+    </div>
+  </header>
+
+  <div class="page page-grid side-left">
+    <div class="stack sticky-side">
+      <section class="card">
+        <div class="card-title"><h2>Script</h2>
+          <span class="row tight"><button class="btn-sm ghost" onclick="loadDemo('tavern')">Tavern example</button><button class="btn-sm ghost" onclick="loadDemo('heist')">Overlap example</button></span>
+        </div>
+        <div class="form-grid" style="grid-template-columns: 1fr 110px;">
+          <div><label class="field"><span>Title</span></label><input type="text" id="titleInput" placeholder="Untitled scene" /></div>
+          <div><label class="field"><span>Gap (ms)</span></label><input type="number" id="pauseInput" value="280" step="20" min="-2000" max="5000" /></div>
+        </div>
+        <label class="field"><span>Lines</span><span class="hint"><kbd>⌘</kbd> <kbd>↵</kbd> to render</span></label>
+        <textarea id="scriptInput" class="mono" placeholder="Torvin: Keep your coin, traveler.&#10;Nyx (sharp witty 28-year-old rogue, crisp British accent): Oh come on, everyone has a price.&#10;[Pause: 350ms]&#10;Torvin: Not me, girl."></textarea>
+        <details style="margin-top: 10px;">
+          <summary class="dim">Script syntax</summary>
+          <div class="syntax" style="margin-top: 8px;">
+            <div><code>Name: line</code> uses a locked voice with that name, or invents one.</div>
+            <div><code>Name (voice description): line</code> describes a new character.</div>
+            <div><code>Name [1.2x, maya1, temp 0.6, seed 42]: line</code> per-line options; also <code>chatterbox</code>, <code>clone</code>, <code>design</code>.</div>
+            <div><code>[Pause: 450ms]</code> or <code>[Overlap: 200ms]</code> on their own line.</div>
+          </div>
+        </details>
+
+        <hr class="sep" />
+        <div class="form-grid">
+          <div>
+            <label class="field"><span>Locked voices speak with</span></label>
+            <select id="cloneEngine"></select>
+          </div>
+          <div>
+            <label class="field"><span>Takes per line</span></label>
+            <select id="takesPerLine"><option value="1">1 (fastest)</option><option value="2" selected>Best of 2</option><option value="3">Best of 3</option></select>
+          </div>
+          <div>
+            <label class="field"><span>Speed</span><span class="val" id="speedVal">1.00x</span></label>
+            <input type="range" id="speedSlider" min="0.75" max="1.6" step="0.05" value="1" oninput="$('speedVal').textContent = (+this.value).toFixed(2) + 'x'" />
+          </div>
+        </div>
+        <div class="row" style="margin-top: 12px; gap: 16px;">
+          <label class="check" title="Each line hears the speaker's previous line so delivery flows"><input type="checkbox" id="continuity" checked /> Context continuity</label>
+          <label class="check" title="Quick replies, a beat on emotion shifts, overlaps on cut-off lines"><input type="checkbox" id="naturalPacing" checked /> Natural pacing</label>
+          <label class="check"><input type="checkbox" id="trimSilence" /> Trim silence</label>
+        </div>
+        <button class="btn primary big" style="width: 100%; margin-top: 16px;" id="renderBtn" onclick="renderScene()">Render scene</button>
+      </section>
+    </div>
+
+    <div class="stack">
+      <section class="card">
+        <div class="card-title">
+          <h2>Library <span class="badge" id="sceneCount" style="margin-left: 6px;">0</span></h2>
+          <input type="search" id="search" placeholder="Search scenes and lines…" style="max-width: 260px;" oninput="renderScenes()" />
+        </div>
+        <div class="stack" style="gap: 10px;" id="sceneList"><div class="empty">Loading…</div></div>
+      </section>
+    </div>
+  </div>
+
+  <script src="/static/ui.js"></script>
+  <script>
+    const esc = VF.esc;
+    const $ = (id) => document.getElementById(id);
+    const state = { scenes: [], open: new Set() };
+
+    const DEMOS = {
+      tavern: ['Blacksmith Shop Confrontation', [
+        'Torvin: Keep your coin, traveler. That blade was forged in the old fires, and nothing in these mountains is for sale anymore.',
+        'Nyx (A sharp, witty 28-year-old female rogue with a sleek British accent, confident and sarcastic tone, brisk conversational pacing): Oh, come on Torvin! Everyone in this city has a price, even a stubborn old dwarf.',
+        '[Pause: 300ms]',
+        'Torvin: You think a bag of stolen silver buys steel like this? Get out of my forge before I call the iron guard.',
+        'Nyx: Relax, old man. Keep the sword, I only came for the map hidden under your anvil.',
+      ]],
+      heist: ['Vault Laser Grid Interruption', [
+        'Nyx (sharp witty 28-year-old female rogue, crisp British accent, brisk pacing) [1.20x]: The security relay is cycling down, just give me ten more seconds on this terminal—',
+        '[Overlap: 220ms]',
+        'Torvin [1.25x]: Ten seconds?! The iron golems are already coming down the corridor!',
+        'Nyx [1.25x]: Relax, old man! Pull the red lever on my mark. Ready? Now!',
+      ]],
+    };
+    function loadDemo(kind) {
+      const [title, lines] = DEMOS[kind];
+      $('titleInput').value = title;
+      $('scriptInput').value = lines.join('\n');
+      saveDraft();
+    }
+
+    function fillEngines(models) {
+      const sel = $('cloneEngine');
+      const keep = sel.value || localStorage.getItem('vf.scenes.clone') || 'qwen3_clone';
+      const clones = models.filter((m) => m.mode === 'voice_clone');
+      sel.innerHTML = clones.map((m) => `<option value="${m.id}" ${m.available === false ? 'disabled' : ''}>${esc(VF.shortName(m.id))}${m.available === false ? ' (not installed)' : ''}</option>`).join('');
+      sel.value = clones.some((m) => m.id === keep && m.available !== false) ? keep : 'qwen3_clone';
+    }
+
+    async function renderScene() {
+      const script_text = $('scriptInput').value.trim();
+      if (!script_text) return VF.toast('Write a script first, or load an example');
+      const btn = $('renderBtn');
+      btn.disabled = true;
+      const started = Date.now();
+      const tick = setInterval(() => { btn.innerHTML = `<span class="spinner"></span> Rendering… ${Math.round((Date.now() - started) / 1000)}s`; }, 400);
+      localStorage.setItem('vf.scenes.clone', $('cloneEngine').value);
+      try {
+        const d = await VF.api('/api/scenes/render', {
+          method: 'POST',
+          body: JSON.stringify({
+            title: $('titleInput').value.trim() || 'Untitled scene',
+            script_text,
+            default_pause_ms: parseInt($('pauseInput').value || '280', 10),
+            speed: +$('speedSlider').value,
+            trim_silence: $('trimSilence').checked,
+            context_continuity: $('continuity').checked,
+            natural_pacing: $('naturalPacing').checked,
+            takes_per_line: parseInt($('takesPerLine').value, 10),
+            clone_model_id: $('cloneEngine').value,
+            auto_lock_new_characters: true,
+          }),
+        });
+        state.scenes.unshift(d.scene);
+        state.open = new Set([d.scene.id]);
+        if (d.status) VF._setEngine(d.status);
+        renderScenes();
+        const a = document.querySelector(`[data-audio="${d.scene.id}"]`);
+        if (a) a.play().catch(() => {});
+        VF.toast(`Scene ready: ${d.scene.line_count} lines, ${d.scene.duration_sec}s, rendered in ${d.scene.elapsed_sec}s`);
+      } catch (e) {
+        VF.toast(`Render failed: ${e.message}`, 7000);
+      } finally {
+        clearInterval(tick);
+        btn.disabled = false;
+        btn.textContent = 'Render scene';
+      }
+    }
+
+    function renderScenes() {
+      const q = $('search').value.trim().toLowerCase();
+      const list = state.scenes.filter((s) => !q || (s.title || '').toLowerCase().includes(q) || (s.segments || []).some((g) => `${g.speaker} ${g.text}`.toLowerCase().includes(q)));
+      $('sceneCount').textContent = state.scenes.length;
+      if (!list.length) {
+        $('sceneList').innerHTML = `<div class="empty">${state.scenes.length ? 'No scenes match.' : 'No scenes yet. Write a script on the left and render it.'}</div>`;
+        return;
+      }
+      $('sceneList').innerHTML = list.map((s) => {
+        const open = state.open.has(s.id);
+        const cast = [...new Set((s.segments || []).map((g) => g.speaker))];
+        return `<div class="item scene">
+          <div class="scene-head" onclick="toggle('${s.id}')">
+            <b class="grow clip">${esc(s.title || 'Untitled')}</b>
+            <span class="dim">${s.line_count} lines · ${s.duration_sec}s${s.created_at ? ' · ' + esc(s.created_at) : ''}</span>
+            <span class="dim">${open ? '▾' : '▸'}</span>
+          </div>
+          <div class="dim clip">${esc(cast.join(', '))}</div>
+          <audio controls preload="none" data-audio="${s.id}" src="${s.url}?v=${encodeURIComponent(s.elapsed_sec || 0)}"></audio>
+          ${open ? `<div class="segs">${(s.segments || []).map((g) => `
+            <div class="seg">
+              <span class="i">${g.index}</span>
+              <span class="spk clip" title="${esc(g.speaker)}">${esc(g.speaker)}</span>
+              <input type="text" id="seg-${s.id}-${g.index}" value="${esc(g.text)}" title="${g.start_sec}s to ${g.end_sec}s · ${esc(VF.shortName(g.model_id))}" onkeydown="if (event.key === 'Enter') reroll('${s.id}', ${g.index}, this)" />
+              <span class="row tight nowrap">
+                ${g.take_url ? `<button class="btn-sm ghost" onclick="playSeg('${g.take_url}')">Play</button>` : ''}
+                <button class="btn-sm" title="Re-generate this line (uses your edit if you changed the text) and re-stitch" onclick="reroll('${s.id}', ${g.index}, this)">Re-take</button>
+              </span>
+            </div>`).join('')}</div>` : ''}
+          <div class="row tight">
+            <a class="btn-sm" href="/api/scenes/${s.id}/export.zip" download>Game bundle (.zip)</a>
+            <a class="btn-sm" href="/api/scenes/${s.id}/subtitles.srt" download="${s.id}.srt">Subtitles</a>
+            <a class="btn-sm" href="${s.url}" download="${esc(s.filename || s.id + '.wav')}">WAV</a>
+            <a class="btn-sm" href="/cast?scene=${s.id}" title="Open in the Casting Desk to switch takes and check lines">Open in Casting Desk</a>
+            <span class="grow"></span>
+            ${open ? '' : `<button class="btn-sm ghost" onclick="toggle('${s.id}')">Edit lines</button>`}
+            <button class="btn-sm ghost danger" onclick="deleteScene('${s.id}')">Delete</button>
+          </div>
+        </div>`;
+      }).join('');
+    }
+    function toggle(id) { state.open.has(id) ? state.open.delete(id) : state.open.add(id); renderScenes(); }
+    let segAudio = null;
+    function playSeg(url) { if (segAudio) segAudio.pause(); segAudio = new Audio(url); segAudio.play().catch(() => {}); }
+
+    async function reroll(sceneId, index, el) {
+      const s = state.scenes.find((x) => x.id === sceneId);
+      const seg = s && (s.segments || []).find((g) => g.index === index);
+      if (!seg) return;
+      const input = $(`seg-${sceneId}-${index}`);
+      const body = { line_index: index, seed: Math.floor(Math.random() * 1e9) };
+      if (input && input.value.trim() && input.value.trim() !== seg.text) body.text = input.value.trim();
+      const btn = el && el.tagName === 'BUTTON' ? el : null;
+      if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>'; }
+      try {
+        const d = await VF.api(`/api/scenes/${sceneId}/reroll-line`, { method: 'POST', body: JSON.stringify(body) });
+        const i = state.scenes.findIndex((x) => x.id === sceneId);
+        if (i >= 0) state.scenes[i] = d.scene;
+        renderScenes();
+        const ns = d.scene.segments.find((g) => g.index === index);
+        if (ns && ns.take_url) playSeg(ns.take_url);
+        VF.toast(`Line ${index} re-taken and the scene re-stitched`);
+      } catch (e) {
+        VF.toast(`Re-take failed: ${e.message}`, 6000);
+        renderScenes();
+      }
+    }
+
+    async function deleteScene(id) {
+      if (!confirm('Delete this scene? Its takes stay in Takes.')) return;
+      try {
+        const d = await VF.api(`/api/scenes/${id}`, { method: 'DELETE' });
+        state.scenes = d.scenes;
+        renderScenes();
+      } catch (e) { VF.toast(e.message); }
+    }
+
+    const DRAFT = 'vf.scenes.draft';
+    function saveDraft() { try { localStorage.setItem(DRAFT, JSON.stringify({ t: $('titleInput').value, s: $('scriptInput').value, p: $('pauseInput').value })); } catch (_) {} }
+    function loadDraft() {
+      try {
+        const d = JSON.parse(localStorage.getItem(DRAFT) || 'null');
+        if (d && d.s) { $('titleInput').value = d.t || ''; $('scriptInput').value = d.s; $('pauseInput').value = d.p || 280; return true; }
+      } catch (_) {}
+      return false;
+    }
+    ['titleInput', 'scriptInput', 'pauseInput'].forEach((id) => $(id).addEventListener('input', saveDraft));
+    window.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !$('renderBtn').disabled) { e.preventDefault(); renderScene(); } });
+    window.addEventListener('vf:engine', (e) => { if (e.detail && e.detail.models && !$('cloneEngine').options.length) fillEngines(e.detail.models); });
+
+    (async function init() {
+      if (!loadDraft()) loadDemo('tavern');
+      try {
+        const [sc, md] = await Promise.all([VF.api('/api/scenes'), VF.api('/api/models')]);
+        state.scenes = sc.scenes || [];
+        fillEngines(md.models || []);
+        const q = new URLSearchParams(location.search).get('open');
+        if (q) state.open.add(q);
+      } catch (e) {
+        VF.toast(`Studio not reachable: ${e.message}`);
+      }
+      renderScenes();
+    })();
+  </script>
+</body>
+</html>

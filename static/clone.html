@@ -3,145 +3,50 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>VoiceForge Clone Studio</title>
+  <title>Clone Studio · VoiceForge</title>
+  <link rel="stylesheet" href="/static/ui.css" />
   <style>
-    :root {
-      --bg-base: #080a0f;
-      --bg-panel: #10141d;
-      --bg-card: #161b28;
-      --bg-input: #0b0e15;
-      --border: #232b3e;
-      --border-light: #2e3852;
-      --text-main: #f1f5f9;
-      --text-muted: #94a3b8;
-      --text-dim: #64748b;
-      --accent-indigo: #6366f1;
-      --accent-violet: #8b5cf6;
-      --accent-emerald: #10b981;
-      --accent-amber: #f59e0b;
-      --accent-rose: #f43f5e;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      min-height: 100vh;
-      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif;
-      background: radial-gradient(circle at 12% 0%, #161a2e 0%, var(--bg-base) 60%) fixed;
-      color: var(--text-main); font-size: 13px; line-height: 1.45; -webkit-font-smoothing: antialiased;
-    }
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-thumb { background: #283147; border-radius: 999px; }
-    header {
-      position: sticky; top: 0; z-index: 40; min-height: 54px; display: flex; align-items: center; justify-content: space-between;
-      gap: 12px; padding: 8px 20px; background: rgba(16, 20, 29, 0.92); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border);
-    }
-    .brand { display: flex; align-items: center; gap: 10px; }
-    .brand-icon {
-      width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
-      background: linear-gradient(135deg, var(--accent-indigo), var(--accent-violet)); font-weight: 800; font-size: 14px; color: #fff;
-    }
-    .brand-title { font-size: 15px; font-weight: 700; letter-spacing: -0.02em; }
-    .brand-sub { font-size: 11px; color: var(--text-muted); }
-    @media (max-width: 600px) { header { padding: 8px 16px; } .brand-sub { display: none; } }
-
-    main { display: grid; grid-template-columns: 300px 1fr; gap: 16px; padding: 16px 20px 110px; max-width: 1500px; margin: 0 auto; }
+    main { display: grid; grid-template-columns: 300px 1fr; gap: 16px; padding: 22px 28px 110px; max-width: 1440px; margin: 0 auto; }
     @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 12px 16px 110px; } }
-    .col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-    .panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
-    .panel-title { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 10px; }
-    .sticky { position: sticky; top: 70px; }
+    .sticky { position: sticky; top: 92px; }
     @media (max-width: 900px) { .sticky { position: static; } }
-    input[type=text], textarea, select {
-      background: var(--bg-input); border: 1px solid var(--border); color: var(--text-main); border-radius: 8px; padding: 7px 10px; font: inherit; outline: none; width: 100%;
-    }
-    input:focus, textarea:focus, select:focus { border-color: var(--accent-indigo); }
-    textarea { resize: vertical; line-height: 1.5; }
-    .btn, .btn-sm {
-      display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid var(--border); background: var(--bg-panel);
-      color: var(--text-main); cursor: pointer; font-family: inherit; font-weight: 600; white-space: nowrap; text-decoration: none; transition: all 0.14s;
-    }
-    .btn { padding: 8px 14px; border-radius: 8px; font-size: 13px; }
-    .btn-sm { padding: 5px 10px; border-radius: 6px; font-size: 11.5px; }
-    .btn:hover, .btn-sm:hover { border-color: var(--accent-indigo); background: rgba(99, 102, 241, 0.16); }
-    .btn.primary { background: linear-gradient(135deg, var(--accent-indigo), var(--accent-violet)); border-color: transparent; color: #fff; }
-    .btn-sm.emerald { border-color: rgba(16, 185, 129, 0.45); color: #6ee7b7; }
-    .btn-sm.rose { border-color: rgba(244, 63, 94, 0.4); color: #fda4af; }
-    .btn-sm.violet { border-color: rgba(139, 92, 246, 0.5); color: #c4b5fd; }
-    .btn-sm.rec { border-color: rgba(244, 63, 94, 0.6); color: #fecdd3; background: rgba(244, 63, 94, 0.12); }
-    .btn-sm:disabled, .btn:disabled { opacity: 0.45; cursor: not-allowed; }
-    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .row.nowrap { flex-wrap: nowrap; }
-    .grow { flex: 1; min-width: 0; }
-    .dim { color: var(--text-dim); font-size: 11.5px; }
-    .muted { color: var(--text-muted); }
-
     .profile-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; }
     .profile-item:hover { background: var(--bg-card); }
-    .profile-item.active { background: rgba(99, 102, 241, 0.14); border-color: rgba(99, 102, 241, 0.45); }
-    .avatar { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; background: linear-gradient(135deg, #312e81, #5b21b6); flex-shrink: 0; }
+    .profile-item.active { background: rgba(139, 124, 246, 0.14); border-color: rgba(139, 124, 246, 0.45); }
+    .avatar { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; background: var(--surface-3); flex-shrink: 0; }
     .coverage { height: 4px; border-radius: 999px; background: var(--bg-input); overflow: hidden; margin-top: 4px; }
-    .coverage > div { height: 100%; background: linear-gradient(90deg, var(--accent-emerald), #34d399); }
-
+    .coverage > div { height: 100%; background: linear-gradient(90deg, var(--accent-emerald), var(--ok)); }
     details.tips summary { cursor: pointer; font-weight: 700; list-style: none; }
     details.tips summary::-webkit-details-marker { display: none; }
     .tips ul { margin: 8px 0 0 16px; display: flex; flex-direction: column; gap: 6px; color: var(--text-muted); font-size: 12px; }
     .tips li b { color: var(--text-main); }
-
     .slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
     @media (max-width: 420px) { .slots { grid-template-columns: 1fr; } }
     .slot { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-    .slot.done { border-color: rgba(16, 185, 129, 0.4); }
+    .slot.done { border-color: rgba(62, 207, 142, 0.4); }
     .slot.recording { border-color: var(--accent-rose); box-shadow: 0 0 0 1px var(--accent-rose) inset; }
     .slot-head { display: flex; align-items: center; gap: 8px; }
     .slot-icon { font-size: 20px; }
     .slot-title { font-size: 14px; font-weight: 700; flex: 1; }
-    .badge { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-muted); white-space: nowrap; }
-    .badge.ok { color: #6ee7b7; border-color: rgba(16, 185, 129, 0.4); }
-    .badge.warn { color: #fcd34d; border-color: rgba(245, 158, 11, 0.45); }
-    .badge.bad { color: #fda4af; border-color: rgba(244, 63, 94, 0.45); }
-    .how { font-size: 11.5px; color: #c4b5fd; }
+    .how { font-size: 11.5px; color: #c2b9ff; }
     .script { background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; font-size: 13.5px; line-height: 1.55; }
     .script[contenteditable]:focus { outline: none; border-color: var(--accent-indigo); }
     .meter { height: 8px; border-radius: 999px; background: var(--bg-input); overflow: hidden; position: relative; }
     .meter > div { height: 100%; width: 0; background: linear-gradient(90deg, #10b981 0%, #10b981 65%, #f59e0b 80%, #f43f5e 95%); background-size: 100% 100%; transition: width 0.05s; }
-    .countdown { font-size: 28px; font-weight: 800; text-align: center; color: #fda4af; }
+    .countdown { font-size: 28px; font-weight: 800; text-align: center; color: var(--bad); }
     .quality { font-size: 11.5px; color: var(--text-muted); display: flex; flex-direction: column; gap: 3px; }
-    .quality .tip { color: #fcd34d; }
+    .quality .tip { color: var(--warn); }
     .clip-ref { font-size: 11px; color: var(--text-dim); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .empty { padding: 30px; text-align: center; color: var(--text-dim); border: 1px dashed var(--border-light); border-radius: 10px; }
-
-    .now-playing {
-      position: fixed; right: 16px; bottom: 16px; z-index: 90; width: min(380px, calc(100vw - 32px));
-      display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px;
-      background: var(--bg-card); border: 1px solid var(--border-light); box-shadow: 0 8px 30px rgba(0,0,0,0.45);
-      transform: translateY(20px); opacity: 0; pointer-events: none; transition: all 0.18s;
-    }
-    .now-playing.show { transform: translateY(0); opacity: 1; pointer-events: auto; }
-    .np-main { flex: 1; min-width: 0; }
-    .np-label { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .np-track { height: 6px; margin-top: 6px; border-radius: 999px; background: var(--bg-input); cursor: pointer; overflow: hidden; }
-    .np-progress { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent-indigo), var(--accent-violet)); }
-    .toast {
-      position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%) translateY(20px); opacity: 0; pointer-events: none;
-      background: var(--bg-card); border: 1px solid var(--border-light); padding: 9px 14px; border-radius: 10px; transition: all 0.2s; z-index: 99; max-width: 90vw;
-    }
-    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-    .spinner { width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.25); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block; }
-    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
-  <header>
-    <div class="brand">
-      <div class="brand-icon">VF</div>
-      <div>
-        <div class="brand-title">Clone Studio</div>
-        <div class="brand-sub">Record one person in every emotion; scenes pick the right clip per line</div>
-      </div>
+  <header class="page-head">
+    <div>
+      <h1>Clone Studio</h1>
+      <p>Record one person in every emotion; scenes pick the right clip per line.</p>
     </div>
-    <div class="row">
-      <a class="btn-sm" href="/cast">🎭 Casting Desk</a>
-      <a class="btn-sm" href="/voices">🗂 Voices</a>
-      <a class="btn-sm" href="/">← Studio</a>
+    <div class="page-actions">
+      <a class="btn-sm" href="/voices">Voice Library</a>
     </div>
   </header>
 
@@ -160,13 +65,13 @@
         <div class="panel-title"><span>Microphone</span></div>
         <select id="micSelect" onchange="savePrefs(); if (micIsOn()) { disarmMic(); armMic().catch(() => {}); }"><option value="">Default microphone</option></select>
         <div class="row" style="margin-top: 8px;">
-          <button class="btn-sm" id="micTestBtn" onclick="toggleMicTest()">🎚 Mic on</button>
+          <button class="btn-sm" id="micTestBtn" onclick="toggleMicTest()">Mic on</button>
           <div class="meter grow"><div id="testMeter"></div></div>
         </div>
         <div class="dim" style="margin-top: 6px;">Switch the mic on before a recording session: it stays on between takes so every take starts at full level. Aim for the yellow on loud words, never red.</div>
 
         <details class="tips" open style="margin-top: 14px;">
-          <summary>🎙 Why recordings sound strange, and how to fix it</summary>
+          <summary>Why recordings sound strange, and how to fix it</summary>
           <ul>
             <li><b>It's not just you.</b> Everyone hates hearing their own recorded voice, because normally you also hear yourself through your skull. The recording is what others hear.</li>
             <li><b>Processing is switched off here.</b> Browsers and call apps run noise suppression, echo cancelling and auto-gain, which make voices sound watery and robotic. This page records the raw mic.</li>
@@ -329,7 +234,7 @@
           <div class="row" style="margin-top: 10px;">
             <span class="badge ${done ? 'ok' : 'warn'}">${done} of ${state.emotions.length} emotions recorded</span>
             ${nextEmpty ? `<button class="btn-sm" onclick="document.getElementById('slot_${nextEmpty.id}').scrollIntoView({behavior: 'smooth', block: 'center'})">Next to record: ${nextEmpty.icon} ${nextEmpty.label}</button>` : '<span class="badge ok">All emotions covered 🎉</span>'}
-            <span class="dim">In the Casting Desk, pick <b>👤 ${escapeHtml(p.name)}</b> as a character's voice and each line uses the closest emotion.</span>
+            <span class="dim">In the Casting Desk, pick <b>${escapeHtml(p.name)}</b> as a character's voice and each line uses the closest emotion.</span>
           </div>
           <div class="row nowrap" style="margin-top: 10px;">
             <input type="text" id="testLine" placeholder="Type a line to hear ${escapeHtml(p.name)} say it…" onkeydown="if (event.key === 'Enter') testProfile(document.getElementById('testBtn'))" />
@@ -337,7 +242,7 @@
               <option value="auto">Auto emotion</option>
               ${state.emotions.map(e => `<option value="${e.id}" ${clipFor(p, e.id) ? '' : 'disabled'}>${e.icon} ${e.label}</option>`).join('')}
             </select>
-            <button class="btn-sm violet" id="testBtn" onclick="testProfile(this)" ${done ? '' : 'disabled'}>🗣 Say</button>
+            <button class="btn-sm violet" id="testBtn" onclick="testProfile(this)" ${done ? '' : 'disabled'}>Say</button>
           </div>
         </div>
         <div class="slots">${state.emotions.map(e => slotCard(p, e)).join('')}</div>`;
@@ -366,8 +271,8 @@
         <div class="how">How: ${escapeHtml(e.how)}</div>
         <div class="script" contenteditable="true" id="script_${e.id}" oninput="state.customScript['${e.id}'] = this.innerText" title="Read this aloud. You can edit it.">${escapeHtml(scriptFor(e.id))}</div>
         <div class="row">
-          <button class="btn-sm" onclick="nextScript('${e.id}')" title="Another suggested line">🔀 Another line</button>
-          <button class="btn-sm violet" onclick="claudeScript('${e.id}', this)" title="Claude writes a fresh line for this emotion, fitting the profile notes">✨ Write one</button>
+          <button class="btn-sm" onclick="nextScript('${e.id}')" title="Another suggested line">Another line</button>
+          <button class="btn-sm violet" onclick="claudeScript('${e.id}', this)" title="Claude writes a fresh line for this emotion, fitting the profile notes">Write one</button>
         </div>
         ${rec ? `
           ${state.recording.countdown ? `<div class="countdown" style="${typeof state.recording.countdown === 'string' ? 'font-size: 15px;' : ''}">${state.recording.countdown}</div>` : `
@@ -375,9 +280,9 @@
           <button class="btn-sm rec" onclick="stopRecording()">⏹ Stop</button>` : `
         <div class="row">
           <button class="btn-sm rec" onclick="startRecording('${e.id}')" ${busy || state.recording ? 'disabled' : ''}>⏺ ${clip ? 'Re-record' : 'Record'}</button>
-          <label class="btn-sm" ${busy ? 'style="opacity:0.45; pointer-events:none;"' : ''}>📁 Upload<input type="file" accept="audio/*,video/mp4,.wav,.mp3,.m4a,.mp4,.mov,.webm,.flac,.ogg,.aac" style="display:none" onchange="uploadTake('${e.id}', this)" /></label>
+          <label class="btn-sm" ${busy ? 'style="opacity:0.45; pointer-events:none;"' : ''}>Upload<input type="file" accept="audio/*,video/mp4,.wav,.mp3,.m4a,.mp4,.mov,.webm,.flac,.ogg,.aac" style="display:none" onchange="uploadTake('${e.id}', this)" /></label>
           ${clip ? `<button class="btn-sm" onclick="play('${clip.url}', ${escapeHtml(JSON.stringify(p.name + ' · ' + e.label + ' (saved clip)'))})">▶ Saved clip</button>
-                    <button class="btn-sm violet" onclick="testSlot('${e.id}', this)" title="Generate a new line from this clip">🗣 Test</button>` : ''}
+                    <button class="btn-sm violet" onclick="testSlot('${e.id}', this)" title="Generate a new line from this clip">Test</button>` : ''}
         </div>`}
         ${take ? `
           <div class="row" style="padding: 8px; border-radius: 8px; background: var(--bg-input);">
@@ -389,11 +294,11 @@
         ${res ? `
           <div class="quality">
             ${res.used_script_as_transcript ? '<span>✓ Transcript matches the script.</span>' : `<span>Heard: “${escapeHtml(res.heard)}” (${Math.round((res.script_match || 0) * 100)}% match, so the heard words are used as the transcript)</span>`}
-            ${(res.quality && res.quality.tips.length) ? res.quality.tips.map(t => `<span class="tip">⚠ ${escapeHtml(t)}</span>`).join('') : (res.quality ? '<span style="color:#6ee7b7;">✓ Levels and noise look good.</span>' : '')}
+            ${(res.quality && res.quality.tips.length) ? res.quality.tips.map(t => `<span class="tip">⚠ ${escapeHtml(t)}</span>`).join('') : (res.quality ? '<span style="color:var(--ok);">✓ Levels and noise look good.</span>' : '')}
           </div>` : (clip ? `<div class="clip-ref" title="${escapeHtml(clip.ref_text)}">“${escapeHtml(clip.ref_text)}”</div>` : '')}
         <div class="row">
           <select class="grow" style="font-size: 11.5px; padding: 4px 6px;" onchange="if (this.value) linkVoice('${e.id}', this.value)">
-            <option value="">🔗 Use an existing voice instead…</option>
+            <option value="">Use an existing voice instead…</option>
             ${otherVoices.map(v => `<option value="${v.id}">${escapeHtml(v.name)}</option>`).join('')}
           </select>
           ${clip ? `<button class="btn-sm rose" onclick="unlinkClip('${e.id}')" title="Remove from this profile (the voice stays in the library)">✕</button>` : ''}
@@ -409,7 +314,7 @@
         state.customScript[emo] = d.script;
         renderProfile();
         if (d.how) toast('How to say it: ' + d.how, 6000);
-      } catch (e) { toast('Claude failed: ' + e.message, 6000); btn.innerHTML = '✨ Write one'; btn.disabled = false; }
+      } catch (e) { toast('Claude failed: ' + e.message, 6000); btn.innerHTML = 'Write one'; btn.disabled = false; }
     }
 
     // ------------------------------------------------------------- recording
@@ -476,7 +381,7 @@
       };
       tick();
     }
-    function updateMicButton() { const b = $('micTestBtn'); if (b) b.textContent = micIsOn() ? '⏹ Mic off' : '🎚 Mic on'; }
+    function updateMicButton() { const b = $('micTestBtn'); if (b) b.textContent = micIsOn() ? '⏹ Mic off' : 'Mic on'; }
     async function toggleMicTest() {
       if (micIsOn()) { disarmMic(); return; }
       try { await armMic(); toast('Mic is on and warming up. It stays on between takes so recordings start at full level.', 5000); }
@@ -651,5 +556,6 @@
     listMics();
     loadAll().catch(e => toast('Could not reach the server: ' + e.message));
   </script>
+  <script src="/static/ui.js"></script>
 </body>
 </html>

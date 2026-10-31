@@ -3,76 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>VoiceForge Voice Library</title>
+  <title>Voice Library · VoiceForge</title>
+  <link rel="stylesheet" href="/static/ui.css" />
   <style>
-    :root {
-      --bg-base: #080a0f;
-      --bg-panel: #10141d;
-      --bg-card: #161b28;
-      --bg-card-hover: #1c2233;
-      --bg-input: #0b0e15;
-      --border: #232b3e;
-      --border-light: #2e3852;
-      --text-main: #f1f5f9;
-      --text-muted: #94a3b8;
-      --text-dim: #64748b;
-      --accent-indigo: #6366f1;
-      --accent-violet: #8b5cf6;
-      --accent-emerald: #10b981;
-      --accent-amber: #f59e0b;
-      --accent-rose: #f43f5e;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      min-height: 100vh;
-      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif;
-      background: radial-gradient(circle at 12% 0%, #161a2e 0%, var(--bg-base) 60%) fixed;
-      color: var(--text-main); font-size: 13px; line-height: 1.45; -webkit-font-smoothing: antialiased;
-    }
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-thumb { background: #283147; border-radius: 999px; }
-    header {
-      position: sticky; top: 0; z-index: 40; min-height: 54px; display: flex; align-items: center; justify-content: space-between;
-      gap: 12px; padding: 8px 20px; background: rgba(16, 20, 29, 0.92); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border);
-    }
-    .brand { display: flex; align-items: center; gap: 10px; }
-    .brand-icon {
-      width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
-      background: linear-gradient(135deg, var(--accent-indigo), var(--accent-violet)); font-weight: 800; font-size: 14px; color: #fff;
-    }
-    .brand-title { font-size: 15px; font-weight: 700; letter-spacing: -0.02em; }
-    .brand-sub { font-size: 11px; color: var(--text-muted); }
-    @media (max-width: 600px) { header { padding: 8px 16px; } .brand-sub { display: none; } }
-
-    main { max-width: 1400px; margin: 0 auto; padding: 16px 20px 110px; display: flex; flex-direction: column; gap: 14px; }
+    main { max-width: 1400px; margin: 0 auto; padding: 22px 28px 110px; display: flex; flex-direction: column; gap: 14px; }
     @media (max-width: 600px) { main { padding: 12px 16px 110px; } }
     .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
-    input[type=text], input[type=search], textarea, select {
-      background: var(--bg-input); border: 1px solid var(--border); color: var(--text-main); border-radius: 8px; padding: 7px 10px; font: inherit; outline: none;
-    }
-    input:focus, textarea:focus, select:focus { border-color: var(--accent-indigo); }
-    textarea { width: 100%; resize: vertical; line-height: 1.5; font-size: 12px; }
-    #search { flex: 1; min-width: 180px; }
-    .chips { display: flex; gap: 6px; flex-wrap: wrap; }
-    .chip { padding: 5px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-muted); cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; }
-    .chip.active { border-color: var(--accent-indigo); color: #c7d2fe; background: rgba(99, 102, 241, 0.16); }
-    .chip .n { color: var(--text-dim); margin-left: 4px; font-weight: 500; }
-    .check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
-    .btn-sm {
-      padding: 5px 10px; border-radius: 6px; font-size: 11.5px; font-weight: 600; border: 1px solid var(--border); background: var(--bg-panel);
-      color: var(--text-main); cursor: pointer; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; text-decoration: none; transition: all 0.14s; font-family: inherit;
-    }
-    .btn-sm:hover { border-color: var(--accent-indigo); background: rgba(99, 102, 241, 0.16); }
-    .btn-sm.emerald { border-color: rgba(16, 185, 129, 0.45); color: #6ee7b7; }
-    .btn-sm.rose { border-color: rgba(244, 63, 94, 0.4); color: #fda4af; }
-    .btn-sm.violet { border-color: rgba(139, 92, 246, 0.5); color: #c4b5fd; }
-    .btn-sm:disabled { opacity: 0.45; cursor: not-allowed; }
-    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .dim { color: var(--text-dim); font-size: 11.5px; }
-    .muted { color: var(--text-muted); }
-    .grow { flex: 1; min-width: 0; }
-
-    .bulkbar { display: none; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(99, 102, 241, 0.45); background: rgba(99, 102, 241, 0.1); }
+    #search { flex: 1; min-width: 180px; width: auto; }
+    .toolbar select { width: auto; }
+    .bulkbar { display: none; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(139, 124, 246, 0.45); background: rgba(139, 124, 246, 0.1); }
     .bulkbar.show { display: flex; }
     .group-title { display: flex; align-items: baseline; gap: 8px; margin: 6px 2px 0; font-size: 13px; font-weight: 700; }
     .group-title .dim { font-weight: 500; }
@@ -80,58 +19,29 @@
     @media (max-width: 420px) { .grid { grid-template-columns: 1fr; } }
     .voice { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 7px; min-width: 0; }
     .voice.selected { border-color: var(--accent-indigo); box-shadow: 0 0 0 1px var(--accent-indigo) inset; }
-    .voice.fav { border-color: rgba(245, 158, 11, 0.45); }
+    .voice.fav { border-color: rgba(240, 180, 76, 0.45); }
     .vhead { display: flex; align-items: center; gap: 6px; min-width: 0; }
     .star { background: none; border: none; cursor: pointer; font-size: 16px; line-height: 1; color: var(--text-dim); padding: 2px; }
-    .star.on { color: #fbbf24; }
+    .star.on { color: var(--warn); }
     .vname { flex: 1; min-width: 0; font-size: 14px; font-weight: 700; color: var(--text-main); font-family: inherit; background: transparent; border: 1px solid transparent; padding: 3px 6px; border-radius: 6px; }
     .vname:hover { border-color: var(--border); }
     .badges { display: flex; gap: 5px; flex-wrap: wrap; }
-    .badge { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-muted); white-space: nowrap; }
-    .badge.warn { color: #fcd34d; border-color: rgba(245, 158, 11, 0.45); }
-    .badge.tag { color: #c4b5fd; border-color: rgba(139, 92, 246, 0.4); cursor: pointer; }
-    .badge.ok { color: #6ee7b7; border-color: rgba(16, 185, 129, 0.4); }
     .vdesc { font-size: 11.5px; color: var(--text-muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .vref { font-size: 11px; color: var(--text-dim); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .edit { display: flex; flex-direction: column; gap: 6px; border-top: 1px dashed var(--border-light); padding-top: 8px; }
     .edit label { font-size: 11px; color: var(--text-muted); font-weight: 600; }
     .try { display: flex; gap: 6px; }
     .try input { flex: 1; min-width: 0; font-size: 12px; padding: 5px 8px; }
-    .empty { padding: 30px; text-align: center; color: var(--text-dim); border: 1px dashed var(--border-light); border-radius: 10px; }
-
-    .now-playing {
-      position: fixed; right: 16px; bottom: 16px; z-index: 90; width: min(380px, calc(100vw - 32px));
-      display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px;
-      background: var(--bg-card); border: 1px solid var(--border-light); box-shadow: 0 8px 30px rgba(0,0,0,0.45);
-      transform: translateY(20px); opacity: 0; pointer-events: none; transition: all 0.18s;
-    }
-    .now-playing.show { transform: translateY(0); opacity: 1; pointer-events: auto; }
-    .np-main { flex: 1; min-width: 0; }
-    .np-label { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .np-track { height: 6px; margin-top: 6px; border-radius: 999px; background: var(--bg-input); cursor: pointer; overflow: hidden; }
-    .np-progress { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent-indigo), var(--accent-violet)); }
-    .toast {
-      position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%) translateY(20px); opacity: 0; pointer-events: none;
-      background: var(--bg-card); border: 1px solid var(--border-light); padding: 9px 14px; border-radius: 10px; transition: all 0.2s; z-index: 99; max-width: 90vw;
-    }
-    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-    .spinner { width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.25); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block; }
-    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
-  <header>
-    <div class="brand">
-      <div class="brand-icon">VF</div>
-      <div>
-        <div class="brand-title">Voice Library</div>
-        <div class="brand-sub">All your locked voices: listen, rename, tidy up</div>
-      </div>
+  <header class="page-head">
+    <div>
+      <h1>Voice Library</h1>
+      <p>Every locked voice: listen, rename, tag and tidy up.</p>
     </div>
-    <div class="row">
-      <a class="btn-sm" href="/clone">🎙 Clone Studio</a>
-      <a class="btn-sm" href="/cast">🎭 Casting Desk</a>
-      <a class="btn-sm" href="/">← Studio</a>
+    <div class="page-actions">
+      <a class="btn-sm" href="/clone">Record a new person</a>
     </div>
   </header>
 
@@ -156,9 +66,9 @@
     </div>
     <div class="bulkbar" id="bulkbar">
       <strong id="selCount">0 selected</strong>
-      <button class="btn-sm violet" onclick="bulkTag()">🏷 Add tag</button>
+      <button class="btn-sm violet" onclick="bulkTag()">Add tag</button>
       <button class="btn-sm" onclick="bulkFavorite(true)">★ Favourite</button>
-      <button class="btn-sm rose" onclick="bulkDelete()">🗑 Delete</button>
+      <button class="btn-sm rose" onclick="bulkDelete()">Delete</button>
       <span class="grow"></span>
       <button class="btn-sm" onclick="selectAllVisible()">Select all shown</button>
       <button class="btn-sm" onclick="clearSelection()">Clear</button>
@@ -329,8 +239,9 @@
         <div class="try">
           <input type="text" placeholder="Type a line to hear this voice say it…" value="${escapeHtml(state.tryText[v.id] || '')}"
             oninput="state.tryText['${v.id}'] = this.value" onkeydown="if (event.key === 'Enter') tryLine('${v.id}', this.nextElementSibling)" />
-          <button class="btn-sm" onclick="tryLine('${v.id}', this)" title="Speak it in this voice">🗣 Say</button>
-          <button class="btn-sm" onclick="toggleOpen('${v.id}')">${open ? 'Close' : '✏️ Edit'}</button>
+          <button class="btn-sm" onclick="tryLine('${v.id}', this)" title="Speak it in this voice">Say</button>
+          <a class="btn-sm" href="/studio?voice=${encodeURIComponent(v.id)}" title="Open the Speak page with this voice (pick Qwen3 Clone or Chatterbox there)">Speak</a>
+          <button class="btn-sm" onclick="toggleOpen('${v.id}')">${open ? 'Close' : 'Edit'}</button>
         </div>
         ${open ? `
         <div class="edit">
@@ -341,11 +252,11 @@
           <label>Tags <span class="dim">(comma separated)</span></label>
           <input type="text" id="tags_${v.id}" value="${escapeHtml((v.tags || []).join(', '))}" placeholder="e.g. uni sketch, irish" />
           <div class="row">
-            <button class="btn-sm emerald" onclick="saveEdit('${v.id}', this)">💾 Save</button>
-            <button class="btn-sm" onclick="retranscribe('${v.id}', this)" title="Run Whisper on the clip again and put the result in the transcript box">🎧 Re-transcribe</button>
+            <button class="btn-sm emerald" onclick="saveEdit('${v.id}', this)">Save</button>
+            <button class="btn-sm" onclick="retranscribe('${v.id}', this)" title="Run Whisper on the clip again and put the result in the transcript box">Re-transcribe</button>
             <span class="grow"></span>
             <span class="dim">${escapeHtml(v.created_at || '')}</span>
-            <button class="btn-sm rose" onclick="deleteVoices(['${v.id}'])">🗑 Delete</button>
+            <button class="btn-sm rose" onclick="deleteVoices(['${v.id}'])">Delete</button>
           </div>
         </div>` : ''}
       </div>`;
@@ -390,7 +301,7 @@
         $('ref_' + id).value = d.ref_text;
         toast('New transcript filled in. Check it, then Save.', 4500);
       } catch (e) { toast(e.message, 5000); }
-      btn.innerHTML = '🎧 Re-transcribe'; btn.disabled = false;
+      btn.innerHTML = 'Re-transcribe'; btn.disabled = false;
     }
     async function tryLine(id, btn) {
       const text = (state.tryText[id] || '').trim();
@@ -454,5 +365,6 @@
 
     load().catch(e => { $('list').innerHTML = `<div class="empty">Could not load voices: ${escapeHtml(e.message)}</div>`; });
   </script>
+  <script src="/static/ui.js"></script>
 </body>
 </html>

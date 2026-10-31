@@ -348,7 +348,30 @@ MODEL_REGISTRY = {
         "badge": "100% Consistent NPC Voices",
         "description": "Locks onto a saved Character Voice from your roster (zero-shot 3s–15s reference) so 1,000+ game dialogue lines never drift.",
     },
+    "chatterbox": {
+        "id": "chatterbox",
+        "name": "Chatterbox — Expressive Clone (PyTorch)",
+        "repo": "ResembleAI/chatterbox",
+        "family": "chatterbox",
+        "mode": "voice_clone",
+        "vram_gb": 3.5,
+        "badge": "Emotion Exaggeration Dial",
+        "description": "Zero-shot cloning from a locked voice with an emotion exaggeration control. Runs in its own PyTorch venv (.venv-chatterbox) as a worker process.",
+    },
 }
+
+# Chatterbox lives in a separate PyTorch venv and is driven over a pipe (see chatterbox_worker.py)
+CHATTERBOX_PYTHON = Path(os.environ.get(
+    "VOICEFORGE_CHATTERBOX_PYTHON", str(Path(__file__).resolve().parent / ".venv-chatterbox" / "bin" / "python")
+))
+CHATTERBOX_DEFAULTS = {"temperature": 0.8, "top_p": 1.0, "repetition_penalty": 1.2, "exaggeration": 0.5, "cfg_weight": 0.5}
+
+
+def chatterbox_available() -> bool:
+    return CHATTERBOX_PYTHON.exists()
+
+
+MODEL_REGISTRY["chatterbox"]["available"] = chatterbox_available()
 
 MAYA1_EMOTION_TAGS = [
     {"tag": "<laugh>", "label": "Laugh", "category": "Vocal"},
@@ -593,6 +616,65 @@ def optimize_character_prompts(
         "golden_sample_maya": golden_sample_maya,
     }
 
+
+
+class ChatterboxRunner:
+    """Keeps one chatterbox_worker.py process alive (model stays loaded) and sends it one line at a time."""
+
+    def __init__(self):
+        if not chatterbox_available():
+            raise RuntimeError(f"Chatterbox venv not found at {CHATTERBOX_PYTHON}. Create .venv-chatterbox and pip install chatterbox-tts.")
+        worker = Path(__file__).resolve().parent / "chatterbox_worker.py"
+        self.proc = subprocess.Popen(
+            [str(CHATTERBOX_PYTHON), str(worker)],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=None, text=True, bufsize=1,
+        )
+        hello = self._read()
+        if not hello.get("ready"):
+            self.close()
+            raise RuntimeError(f"Chatterbox failed to load: {hello.get('error', 'unknown error')}")
+        self.sample_rate = int(hello.get("sample_rate", 24000))
+        self.device = hello.get("device")
+
+    def _read(self) -> Dict[str, Any]:
+        while True:
+            line = self.proc.stdout.readline()
+            if not line:
+                raise RuntimeError("Chatterbox worker exited unexpectedly (see studio log).")
+            line = line.strip()
+            if line.startswith("{"):
+                return json.loads(line)
+
+    def generate(self, text: str, ref_audio_path: Optional[str], **params) -> Tuple[np.ndarray, int]:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            out_path = tmp.name
+        try:
+            req = {"text": text, "out_path": out_path, "audio_prompt_path": ref_audio_path, **params}
+            self.proc.stdin.write(json.dumps(req) + "\n")
+            self.proc.stdin.flush()
+            resp = self._read()
+            if not resp.get("ok"):
+                raise RuntimeError(f"Chatterbox: {resp.get('error')}")
+            audio, sr = sf.read(out_path, dtype="float32")
+            if audio.ndim > 1:
+                audio = audio.mean(axis=1)
+            return audio, int(sr)
+        finally:
+            try:
+                os.unlink(out_path)
+            except OSError:
+                pass
+
+    def close(self) -> None:
+        proc = getattr(self, "proc", None)
+        if proc is None or proc.poll() is not None:
+            return
+        try:
+            proc.stdin.write(json.dumps({"cmd": "quit"}) + "\n")
+            proc.stdin.flush()
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
 
 
 class Maya1MLXRunner:
@@ -1065,6 +1147,7 @@ class VoiceForgeEngine:
         """Drops the active model and any idle hooks (Whisper) and hands the memory back to macOS."""
         with self._lock:
             if self.active_model is not None:
+                self._close_active()
                 del self.active_model
                 self.active_model = None
                 self.active_model_id = None
@@ -1076,6 +1159,15 @@ class VoiceForgeEngine:
             release_memory()
             self.status_message = f"Model unloaded ({reason})"
             return self.get_status()
+
+    def _close_active(self) -> None:
+        """Out-of-process runners (Chatterbox) must kill their worker; `del` alone won't free its memory."""
+        close = getattr(self.active_model, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                pass
 
     def _idle_watchdog(self) -> None:
         while True:
@@ -1106,6 +1198,7 @@ class VoiceForgeEngine:
             try:
                 # Unload current model cleanly to keep Unified Memory low
                 if self.active_model is not None:
+                    self._close_active()
                     del self.active_model
                     self.active_model = None
                     self.active_model_id = None
@@ -1114,6 +1207,8 @@ class VoiceForgeEngine:
                 t0 = time.perf_counter()
                 if info["family"] == "maya1":
                     self.active_model = Maya1MLXRunner(info["repo"])
+                elif info["family"] == "chatterbox":
+                    self.active_model = ChatterboxRunner()
                 else:
                     self.active_model = load_mlx_tts_model(info["repo"])
                     _install_qwen3_timbre_lock(self.active_model)
@@ -1166,6 +1261,46 @@ class VoiceForgeEngine:
                 # Per-line buffers (ref audio, KV cache, decoder activations) are done with; hand them back
                 _mx_call("clear_cache")
 
+    def _synthesize_chatterbox(
+        self, raw_text, clean_text, extracted_tags, ref_audio_path, speed, trim_silence, temperature, top_p,
+        repetition_penalty, seed, dynamic_temperature, t0,
+    ) -> Tuple[np.ndarray, int, Dict[str, Any]]:
+        d = CHATTERBOX_DEFAULTS
+        temp = temperature if temperature is not None else d["temperature"]
+        # Chatterbox's own emotion dial: lean into charged lines instead of raising temperature
+        boost = _emotion_temperature_boost(raw_text, extracted_tags) if dynamic_temperature else 0.0
+        exaggeration = round(min(d["exaggeration"] + boost * 2.0, 0.9), 2)
+        params = {
+            "temperature": temp,
+            "top_p": top_p if top_p is not None else d["top_p"],
+            "repetition_penalty": repetition_penalty if repetition_penalty is not None else d["repetition_penalty"],
+            "exaggeration": exaggeration,
+            # Lower CFG gives more natural pacing when exaggeration is high
+            "cfg_weight": d["cfg_weight"] if exaggeration <= 0.6 else 0.35,
+            "seed": seed,
+        }
+        audio_np, sr = self.active_model.generate(clean_text, ref_audio_path, **params)
+        audio_np = apply_studio_pacing(audio_np, sr, speed=speed, trim_silence=trim_silence)
+        elapsed = time.perf_counter() - t0
+        duration = audio_np.shape[0] / sr
+        metrics: Dict[str, Any] = {
+            "elapsed_sec": round(elapsed, 2),
+            "rtf": round(duration / elapsed, 2) if elapsed > 0 else 0,
+        }
+        metrics.update(analyze_voice_acoustics(audio_np, sr, clean_text))
+        metrics.update({
+            "duration_sec": round(duration, 2),
+            "speed": round(speed, 2),
+            "temperature": round(temp, 2),
+            "top_p": round(params["top_p"], 2),
+            "exaggeration": exaggeration,
+            "cfg_weight": params["cfg_weight"],
+            "seed": seed,
+            "context_chained": False,
+            "voice_locked": bool(ref_audio_path),
+        })
+        return audio_np, sr, metrics
+
     def _synthesize_locked(
         self, model_id, text, instruct, language, speed, trim_silence, temperature, top_p,
         repetition_penalty, seed, ref_audio_path, ref_text, prev_audio_path, prev_text,
@@ -1192,6 +1327,12 @@ class VoiceForgeEngine:
         clean_prev_text = None
         if prev_text:
             clean_prev_text, _ = sanitize_dialogue_for_model(prev_text, model_id="qwen3_clone")
+
+        if info["family"] == "chatterbox":
+            return self._synthesize_chatterbox(
+                text, clean_text, extracted_tags, ref_audio_path, speed, trim_silence, temperature, top_p,
+                repetition_penalty, effective_seed, dynamic_temperature, t0,
+            )
 
         # Optional emotion blend: a second clip of the same person joined onto the golden reference
         blended_np, blended_text, used_blend = None, None, False

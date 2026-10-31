@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Engines · VoiceForge</title>
+  <link rel="stylesheet" href="/static/ui.css" />
+  <style>
+    .eng { display: flex; flex-direction: column; gap: 10px; }
+    .eng.loaded { border-color: rgba(62, 207, 142, 0.45); }
+    .eng h3 { font-size: 14px; font-weight: 650; }
+    .eng p { color: var(--text-2); font-size: 12.5px; }
+    .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 12px; }
+    .kv span:nth-child(odd) { color: var(--text-3); }
+    .kv span:nth-child(even) { font-variant-numeric: tabular-nums; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  </style>
+</head>
+<body>
+  <header class="page-head">
+    <div>
+      <h1>Engines</h1>
+      <p>Only one engine sits in memory at a time. Load one ahead of a session, or free the memory when you're done.</p>
+    </div>
+    <div class="page-actions">
+      <button class="btn-sm" onclick="VF.unloadModel().then(load).catch(e => VF.toast(e.message))">Unload everything</button>
+    </div>
+  </header>
+
+  <div class="page stack">
+    <section class="card">
+      <div class="card-title"><h2>Right now</h2><span class="hint" id="statusMsg"></span></div>
+      <div class="stats" id="stats"></div>
+    </section>
+
+    <div class="grid-cards" id="engines" style="grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));"></div>
+
+    <section class="card">
+      <div class="card-title"><h2>Helpers</h2></div>
+      <div class="stack" style="gap: 10px;">
+        <div class="row between"><div><b>Claude</b><div class="dim">Breaks scripts down and improves voice descriptions on the Casting Desk.</div></div><span class="pill"><span class="dot" id="claudeDot"></span><span id="claudeText">Checking…</span></span></div>
+        <div class="row between"><div><b>Whisper</b><div class="dim">Transcribes recordings and checks rendered lines. Loads on demand and is freed with the engine.</div></div><span class="pill">On demand</span></div>
+      </div>
+    </section>
+  </div>
+
+  <script src="/static/ui.js"></script>
+  <script>
+    const esc = VF.esc;
+    const $ = (id) => document.getElementById(id);
+    const USE = {
+      qwen3_voicedesign: 'Speak page (Voice Design), new characters in scenes, Casting Desk auditions.',
+      maya1: 'Speak page (Acting), scene lines with <laugh>-style tags or [maya1].',
+      qwen3_clone: 'Default for every locked voice in scenes and the Casting Desk.',
+      chatterbox: 'Pick it on Speak, under "Locked voices speak with" on Scenes and the Casting Desk, or tag a line [chatterbox].',
+    };
+
+    function render(st) {
+      if (!st) { $('stats').innerHTML = '<div class="empty">Studio offline</div>'; return; }
+      $('statusMsg').textContent = st.status_message || '';
+      const stat = (v, l) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`;
+      $('stats').innerHTML = [
+        stat(esc(st.loading_model_id ? 'Loading…' : st.active_model_id ? VF.shortName(st.active_model_id) : 'Nothing'), 'Loaded engine'),
+        stat(`${(st.active_memory_gb || 0).toFixed(1)} GB`, 'Model memory in use'),
+        stat(`${(st.cache_memory_gb || 0).toFixed(1)} GB`, `Cache (cap ${st.mlx_cache_limit_gb ?? '?'} GB)`),
+        stat(`${(st.peak_memory_gb || 0).toFixed(1)} GB`, 'Peak during last line'),
+        stat(st.idle_unload_minutes ? `${st.idle_unload_minutes} min` : 'Off', 'Auto-unload when idle'),
+      ].join('');
+      $('engines').innerHTML = (st.models || []).map((m) => {
+        const loaded = st.active_model_id === m.id, loading = st.loading_model_id === m.id, off = m.available === false;
+        return `<div class="card eng ${loaded ? 'loaded' : ''}">
+          <div class="row between nowrap">
+            <h3>${esc(VF.shortName(m.id))}</h3>
+            ${off ? '<span class="badge warn">Not installed</span>' : loading ? '<span class="badge warn">Loading</span>' : loaded ? '<span class="badge ok">Loaded</span>' : '<span class="badge">Idle</span>'}
+          </div>
+          <p>${esc(m.description || '')}</p>
+          <div class="kv">
+            <span>Model</span><span class="mono clip" title="${esc(m.repo)}">${esc(m.repo)}</span>
+            <span>Memory</span><span>~${m.vram_gb} GB</span>
+            <span>Good for</span><span>${esc(m.badge || '')}</span>
+            <span>Used by</span><span>${esc(USE[m.id] || '')}</span>
+          </div>
+          ${off && m.id === 'chatterbox' ? `<div class="note">Install it into its own venv next to the studio:<br><code>python3.11 -m venv .venv-chatterbox && .venv-chatterbox/bin/pip install chatterbox-tts</code>, then restart the studio.</div>` : ''}
+          <div class="row tight">
+            ${loaded ? `<button class="btn-sm" onclick="unload()">Unload</button>` : `<button class="btn-sm primary" ${off || loading ? 'disabled' : ''} onclick="loadEngine('${m.id}', this)">Load</button>`}
+            <a class="btn-sm ghost" href="/studio?engine=${m.id}">Try on Speak</a>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    async function loadEngine(id, btn) {
+      if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Loading'; }
+      await VF.loadModel(id).catch(() => {});
+      load();
+    }
+    async function unload() { await VF.unloadModel().catch((e) => VF.toast(e.message)); load(); }
+    async function load() { render(await VF.refreshEngine()); }
+    window.addEventListener('vf:engine', (e) => render(e.detail));
+
+    (async function init() {
+      try {
+        const s = await VF.api('/api/cast/claude-status');
+        $('claudeDot').className = 'dot ' + (s.available ? 'ok' : 'bad');
+        $('claudeText').textContent = s.available ? `Ready (${s.via})` : 'Signed out';
+        $('claudeText').title = s.detail || '';
+      } catch (_) { $('claudeDot').className = 'dot bad'; $('claudeText').textContent = 'Unavailable'; }
+    })();
+  </script>
+</body>
+</html>

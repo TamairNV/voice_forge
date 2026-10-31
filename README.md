@@ -2,7 +2,7 @@
 
 **VoiceForge Studio** is a local 24kHz Text-to-Speech (TTS), Voice Design, Expressive Acting, and Zero-Shot Character Cloning studio built natively for **Apple Silicon (M-series Macs)** using **Apple's Metal MLX framework**.
 
-It includes both a **100vh zero-scroll dark-mode Web Studio** (`http://127.0.0.1:7860`) and a **full REST + OpenAI-compatible API** (`http://127.0.0.1:7860/docs`) so another LLM, AI agent, or game engine can control every feature programmatically.
+It includes both a **multi-page dark Web Studio** (`http://127.0.0.1:7860`) and a **full REST + OpenAI-compatible API** (`http://127.0.0.1:7860/docs`) so another LLM, AI agent, or game engine can control every feature programmatically.
 
 ---
 
@@ -13,6 +13,7 @@ It includes both a **100vh zero-scroll dark-mode Web Studio** (`http://127.0.0.1
 | `qwen3_voicedesign` | **Qwen3-TTS 1.7B — Voice Design** | `mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16` | `bf16` (~4.5 GB) | Inventing brand-new studio voices from a natural-language description of age, gender, timbre, accent, and pacing (~2.0x real-time on M4 Pro). |
 | `maya1` | **Maya-1 3.3B — Expressive Acting** | `nhe-ai/maya1-mlx-8Bit` + `snac_24khz` | `8-bit MLX` (~3.6 GB) | Character acting with voice descriptions + **20+ inline emotion tags** (`<laugh>`, `<sigh>`, `<whisper>`, `<gasp>`, `<angry>`, `<cry>`, `<snort>`). |
 | `qwen3_clone` | **Qwen3-TTS 1.7B — Base Voice Lock** | `mlx-community/Qwen3-TTS-12Hz-1.7B-Base-bf16` | `bf16` (~4.5 GB) | Zero-shot voice cloning that locks onto a saved Character Voice from your roster so 1,000+ NPC game dialogue lines never drift. |
+| `chatterbox` | **Chatterbox (Resemble AI)** | `ResembleAI/chatterbox` (PyTorch, MPS) | ~3.5 GB, separate process | Zero-shot cloning from a locked voice with an emotion exaggeration dial (raised automatically on charged lines). Optional: needs `.venv-chatterbox` (`python3.11 -m venv .venv-chatterbox && .venv-chatterbox/bin/pip install chatterbox-tts`). Runs as `chatterbox_worker.py` and is killed on swap/unload. Pick it per scene with `clone_model_id: "chatterbox"` or per line with `[chatterbox]`. |
 
 *Note: Only one model is held in Apple Metal VRAM at a time. Swapping models automatically unloads the previous weights (`gc.collect()` + `mx.clear_cache()`) and loads the new engine in ~1.2 seconds.*
 
@@ -37,7 +38,10 @@ chmod +x setup.sh start_studio.sh
 ```bash
 ./start_studio.sh
 ```
-- **Web Studio UI**: [http://127.0.0.1:7860](http://127.0.0.1:7860)
+- **Web Studio UI**: [http://127.0.0.1:7860](http://127.0.0.1:7860). Pages share one sidebar with an engine switcher:
+  Home `/`, Speak `/studio` (one line, any engine), Casting Desk `/cast`, Scenes `/scenes`, Voice Library `/voices`,
+  Clone Studio `/clone`, Takes `/history` (save as voice, stitch takes) and Engines `/engines` (load/unload, memory).
+  Shared styles and the sidebar live in `static/ui.css` and `static/ui.js`.
 - **Interactive Swagger / OpenAPI Docs**: [http://127.0.0.1:7860/docs](http://127.0.0.1:7860/docs)
 - **OpenAPI Spec (for LLM Tool Calling)**: [http://127.0.0.1:7860/openapi.json](http://127.0.0.1:7860/openapi.json)
 

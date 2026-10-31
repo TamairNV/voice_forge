@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Takes · VoiceForge</title>
+  <link rel="stylesheet" href="/static/ui.css" />
+  <style>
+    .take { display: grid; grid-template-columns: 22px 1fr 260px auto; gap: 12px; align-items: center; }
+    .take.sel { border-color: var(--accent); background: var(--accent-soft); }
+    .take .t-text { color: var(--text); }
+    .take .t-sub { color: var(--text-3); font-size: 11.5px; }
+    @media (max-width: 1000px) { .take { grid-template-columns: 22px 1fr; } .take audio, .take .acts { grid-column: 2; } }
+    .bulk { display: none; }
+    .bulk.show { display: flex; }
+  </style>
+</head>
+<body>
+  <header class="page-head">
+    <div>
+      <h1>Takes</h1>
+      <p>Every line you've generated. Save the good ones as voices, or stitch a few into a scene.</p>
+    </div>
+    <div class="page-actions">
+      <span class="dim" id="stats"></span>
+    </div>
+  </header>
+
+  <div class="page stack">
+    <div class="card row" style="padding: 10px 12px;">
+      <input type="search" id="search" class="grow" style="min-width: 200px; width: auto;" placeholder="Search text, voice or description…" oninput="render()" />
+      <select id="engineFilter" style="width: 200px;" onchange="render()"><option value="">All engines</option></select>
+      <select id="voiceFilter" style="width: 200px;" onchange="render()"><option value="">All voices</option></select>
+    </div>
+
+    <div class="card bulk row" id="bulk" style="padding: 10px 12px; border-color: var(--accent);">
+      <b id="selCount">0 selected</b>
+      <input type="text" id="stitchTitle" placeholder="Scene title" style="width: 220px;" />
+      <button class="btn-sm primary" onclick="stitch()">Stitch into a scene</button>
+      <button class="btn-sm danger" onclick="bulkDelete()">Delete</button>
+      <span class="grow"></span>
+      <button class="btn-sm ghost" onclick="clearSel()">Clear</button>
+    </div>
+
+    <div class="stack" style="gap: 8px;" id="list"><div class="empty">Loading…</div></div>
+  </div>
+
+  <div class="modal-backdrop" id="lockModal">
+    <div class="modal">
+      <h3>Save take as a voice</h3>
+      <p class="dim" style="margin-bottom: 14px;">Clone engines can then speak any new line in this exact voice.</p>
+      <label class="field"><span>Name</span></label>
+      <input type="text" id="lockName" onkeydown="if (event.key === 'Enter') confirmLock()" />
+      <label class="field"><span>Notes</span></label>
+      <input type="text" id="lockDesc" />
+      <div class="row" style="justify-content: flex-end; margin-top: 16px;">
+        <button class="btn" onclick="closeLock()">Cancel</button>
+        <button class="btn primary" onclick="confirmLock()">Save voice</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/ui.js"></script>
+  <script>
+    const esc = VF.esc;
+    const $ = (id) => document.getElementById(id);
+    const state = { takes: [], sel: [], lockId: null };
+
+    function filters() {
+      const engines = [...new Set(state.takes.map((t) => t.model_id).filter(Boolean))];
+      const voices = [...new Set(state.takes.map((t) => t.character_name).filter(Boolean))].sort();
+      const e = $('engineFilter'), v = $('voiceFilter');
+      const ek = e.value, vk = v.value;
+      e.innerHTML = '<option value="">All engines</option>' + engines.map((id) => `<option value="${id}">${esc(VF.shortName(id))}</option>`).join('');
+      v.innerHTML = '<option value="">All voices</option>' + voices.map((n) => `<option>${esc(n)}</option>`).join('');
+      e.value = ek; v.value = vk;
+    }
+
+    function visible() {
+      const q = $('search').value.trim().toLowerCase(), ek = $('engineFilter').value, vk = $('voiceFilter').value;
+      return state.takes.filter((t) => (!ek || t.model_id === ek) && (!vk || t.character_name === vk)
+        && (!q || `${t.text} ${t.instruct} ${t.character_name || ''}`.toLowerCase().includes(q)));
+    }
+
+    function render() {
+      const list = visible();
+      $('stats').textContent = `${state.takes.length} takes (the newest 100 are kept)`;
+      $('bulk').classList.toggle('show', state.sel.length > 0);
+      $('selCount').textContent = `${state.sel.length} selected${state.sel.length > 1 ? ', stitched in this order' : ''}`;
+      $('list').innerHTML = list.length ? list.map((t) => {
+        const n = state.sel.indexOf(t.id);
+        return `<div class="item take ${n >= 0 ? 'sel' : ''}">
+          <input type="checkbox" ${n >= 0 ? 'checked' : ''} onchange="toggleSel('${t.id}')" title="Select to stitch or delete" />
+          <div style="min-width: 0;">
+            <div class="row tight nowrap"><b class="clip">${esc(t.character_name || 'Designed voice')}</b><span class="badge">${esc(VF.shortName(t.model_id))}</span>${t.blend_with ? `<span class="badge accent">blend ${esc(t.blend_with)}</span>` : ''}</div>
+            <div class="t-text">“${esc(t.text)}”</div>
+            <div class="t-sub clip">${esc(t.created_at || '')} · ${t.metrics?.duration_sec || 0}s${t.metrics?.temperature != null ? ' · temp ' + t.metrics.temperature : ''}${t.instruct ? ' · ' + esc(t.instruct) : ''}</div>
+          </div>
+          <audio controls preload="none" src="${t.url}"></audio>
+          <div class="row tight nowrap acts">
+            <a class="btn-sm" href="/studio?engine=${encodeURIComponent(t.model_id || '')}${t.character_id ? '&voice=' + encodeURIComponent(t.character_id) : ''}" title="Open the Speak page with this engine and voice">Speak again</a>
+            <button class="btn-sm" onclick="openLock('${t.id}')">Save as voice</button>
+            <a class="btn-sm ghost" href="${t.url}" download="${esc(t.filename)}">Download</a>
+            <button class="btn-sm ghost danger" onclick="del(['${t.id}'])">Delete</button>
+          </div>
+        </div>`;
+      }).join('') : `<div class="empty">${state.takes.length ? 'No takes match.' : 'No takes yet. Generate one on the Speak page.'}</div>`;
+    }
+
+    function toggleSel(id) { const i = state.sel.indexOf(id); i >= 0 ? state.sel.splice(i, 1) : state.sel.push(id); render(); }
+    function clearSel() { state.sel = []; render(); }
+
+    async function del(ids) {
+      try {
+        let d = null;
+        for (const id of ids) d = await VF.api(`/api/takes/${id}`, { method: 'DELETE' });
+        if (d) state.takes = d.takes;
+        state.sel = state.sel.filter((x) => !ids.includes(x));
+        filters(); render();
+      } catch (e) { VF.toast(e.message); }
+    }
+    function bulkDelete() { if (confirm(`Delete ${state.sel.length} takes?`)) del([...state.sel]); }
+
+    async function stitch() {
+      if (state.sel.length < 1) return;
+      try {
+        const d = await VF.api('/api/scenes/stitch', { method: 'POST', body: JSON.stringify({ title: $('stitchTitle').value.trim() || 'Stitched takes', take_ids: state.sel, pause_ms: 280 }) });
+        const sc = d.scene || d;
+        VF.toast('Stitched. Opening it in Scenes…');
+        setTimeout(() => { location.href = `/scenes?open=${encodeURIComponent(sc.id)}`; }, 600);
+      } catch (e) { VF.toast(`Stitch failed: ${e.message}`); }
+    }
+
+    function openLock(id) {
+      state.lockId = id;
+      const t = state.takes.find((x) => x.id === id);
+      $('lockName').value = '';
+      $('lockDesc').value = t?.instruct || '';
+      $('lockModal').classList.add('show');
+      $('lockName').focus();
+    }
+    function closeLock() { $('lockModal').classList.remove('show'); }
+    async function confirmLock() {
+      const name = $('lockName').value.trim();
+      if (!name) return VF.toast('Give the voice a name');
+      try {
+        await VF.api('/api/characters/from-take', { method: 'POST', body: JSON.stringify({ take_id: state.lockId, name, description: $('lockDesc').value.trim() }) });
+        closeLock();
+        VF.toast(`Saved “${name}” to the Voice Library`);
+      } catch (e) { VF.toast(e.message); }
+    }
+    window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLock(); });
+
+    (async function init() {
+      try {
+        const d = await VF.api('/api/takes?limit=100');
+        state.takes = d.takes || [];
+      } catch (e) { VF.toast(`Studio not reachable: ${e.message}`); }
+      filters(); render();
+    })();
+  </script>
+</body>
+</html>

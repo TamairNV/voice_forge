@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Speak · VoiceForge</title>
+  <link rel="stylesheet" href="/static/ui.css" />
+  <style>
+    .engine-pick { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+    .engine-opt { text-align: left; border: 1px solid var(--line); background: var(--surface-2); border-radius: var(--radius-sm); padding: 10px 12px; cursor: pointer; color: var(--text); font: inherit; display: flex; flex-direction: column; gap: 2px; transition: border-color 0.12s, background 0.12s; }
+    .engine-opt:hover { border-color: var(--line-2); }
+    .engine-opt.active { border-color: var(--accent); background: var(--accent-soft); }
+    .engine-opt:disabled { opacity: 0.45; cursor: not-allowed; }
+    .engine-opt b { font-weight: 600; font-size: 13px; }
+    .engine-opt span { color: var(--text-3); font-size: 11.5px; }
+    .engine-opt .state { margin-top: 4px; font-size: 11px; display: flex; align-items: center; gap: 6px; color: var(--text-2); }
+    .presets { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+    .presets .chip { white-space: nowrap; }
+    .traits { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .traits .chip { font-size: 11.5px; padding: 3px 9px; }
+    #dialogueInput { min-height: 130px; font-size: 14px; }
+    .tags { display: flex; gap: 5px; flex-wrap: wrap; }
+    .tags .chip { font-family: var(--mono); font-size: 11px; padding: 2px 8px; }
+    .take { display: flex; flex-direction: column; gap: 6px; }
+    .take .t-text { color: var(--text); font-size: 12.5px; }
+    .take .t-voice { color: var(--text-3); font-size: 11.5px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <header class="page-head">
+    <div>
+      <h1>Speak</h1>
+      <p>Say one line with any engine: invent a voice, act it out, or speak as a locked voice.</p>
+    </div>
+    <div class="page-actions">
+      <a class="btn-sm" href="/history">All takes</a>
+    </div>
+  </header>
+
+  <div class="page page-grid side-right">
+    <div class="stack">
+      <section class="card">
+        <div class="card-title"><h2>Engine</h2><span class="hint" id="engineHint"></span></div>
+        <div class="engine-pick" id="enginePick"></div>
+      </section>
+
+      <section class="card">
+        <div id="presetBlock">
+          <div class="field-label"><span>Start from an archetype</span><span class="hint">Fills the voice and a sample line</span></div>
+          <div class="presets" id="presets"></div>
+        </div>
+
+        <div id="voiceBlock" class="hidden">
+          <label class="field"><span>Locked voice</span><a class="hint" href="/voices">Manage voices</a></label>
+          <select id="characterSelect"></select>
+        </div>
+
+        <div id="instructBlock">
+          <label class="field">
+            <span>Voice description</span>
+            <button class="btn-sm ghost" onclick="optimizePrompt()" title="Expand a rough idea into the full 7-part voice description">✨ Expand idea</button>
+          </label>
+          <textarea id="instructInput" rows="3" placeholder="A rough idea is fine, e.g. grumpy Scottish dwarf blacksmith. Press Expand idea to flesh it out."></textarea>
+          <div class="traits" id="traits"></div>
+        </div>
+
+        <div id="tagBlock" class="hidden">
+          <label class="field"><span>Acting tags</span><span class="hint">Click to insert at the cursor</span></label>
+          <div class="tags" id="mayaTags"></div>
+        </div>
+
+        <label class="field"><span>Line</span><span class="hint"><kbd>⌘</kbd> <kbd>↵</kbd> to generate</span></label>
+        <textarea id="dialogueInput" placeholder="What should they say?"></textarea>
+
+        <details style="margin-top: 14px;" id="advanced">
+          <summary class="row between"><span class="muted" style="font-weight: 550;">Delivery and sampling</span><span class="dim" id="samplingSummary">Auto</span></summary>
+          <div class="form-grid" style="margin-top: 12px;">
+            <div>
+              <label class="field"><span>Language</span></label>
+              <select id="languageSelect">
+                <option value="english">English</option><option value="auto">Auto-detect</option><option value="chinese">Chinese</option>
+                <option value="japanese">Japanese</option><option value="korean">Korean</option><option value="french">French</option>
+                <option value="german">German</option><option value="spanish">Spanish</option>
+              </select>
+            </div>
+            <div>
+              <label class="field"><span>Speed</span><span class="val" id="speedVal">1.00x</span></label>
+              <input type="range" id="speedSlider" min="0.75" max="1.6" step="0.05" value="1" oninput="syncLabels()" />
+            </div>
+            <div>
+              <label class="field"><span>Tighten pauses</span></label>
+              <label class="check"><input type="checkbox" id="trimSilence" /> Trim silence</label>
+            </div>
+          </div>
+          <hr class="sep" />
+          <div class="row between">
+            <label class="check"><input type="checkbox" id="samplingAuto" checked onchange="syncLabels()" /> Auto sampling (engine defaults, extra life on emotional lines)</label>
+            <button class="btn-sm ghost" onclick="resetSampling()">Reset to engine defaults</button>
+          </div>
+          <div class="form-grid" style="margin-top: 10px;" id="samplingGrid">
+            <div>
+              <label class="field"><span>Temperature</span><span class="val" id="tempVal"></span></label>
+              <input type="range" id="tempSlider" min="0.2" max="1.3" step="0.01" oninput="syncLabels()" />
+            </div>
+            <div>
+              <label class="field"><span>Top-p</span><span class="val" id="topPVal"></span></label>
+              <input type="range" id="topPSlider" min="0.5" max="1" step="0.01" oninput="syncLabels()" />
+            </div>
+            <div>
+              <label class="field"><span>Repetition penalty</span><span class="val" id="repVal"></span></label>
+              <input type="range" id="repSlider" min="1" max="1.7" step="0.01" oninput="syncLabels()" />
+            </div>
+          </div>
+        </details>
+
+        <div class="row" style="margin-top: 16px;">
+          <button class="btn primary big grow" id="generateBtn" onclick="generate()">Generate</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="stack sticky-side">
+      <section class="card">
+        <div class="card-title"><h2>Monitor</h2><span class="hint clip" id="monitorLabel" style="max-width: 60%;">Nothing yet</span></div>
+        <canvas class="wave" id="wave"></canvas>
+        <audio id="player" controls style="margin-top: 10px;"></audio>
+        <div class="row between" style="margin-top: 8px;">
+          <div class="metrics" id="metrics"></div>
+          <div class="row tight hidden" id="monitorActions">
+            <button class="btn-sm" onclick="openLock(state.current && state.current.id)">Save as voice</button>
+            <a class="btn-sm" id="downloadLink" href="#" download>Download</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-title"><h2>Recent takes</h2><a class="hint" href="/history">See all</a></div>
+        <div class="stack" style="gap: 8px;" id="takes"></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="lockModal">
+    <div class="modal">
+      <h3>Save take as a voice</h3>
+      <p class="dim" style="margin-bottom: 14px;">The take becomes a locked reference, so clone engines can speak any new line in this exact voice.</p>
+      <label class="field"><span>Name</span></label>
+      <input type="text" id="lockName" placeholder="e.g. Torvin the Blacksmith" onkeydown="if (event.key === 'Enter') confirmLock()" />
+      <label class="field"><span>Notes</span></label>
+      <input type="text" id="lockDesc" placeholder="e.g. Gruff Scottish dwarf" />
+      <div class="row" style="justify-content: flex-end; margin-top: 16px;">
+        <button class="btn" onclick="closeLock()">Cancel</button>
+        <button class="btn primary" onclick="confirmLock()">Save voice</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/ui.js"></script>
+  <script>
+    const esc = VF.esc;
+    const DEFAULTS = {
+      qwen3_voicedesign: { temp: 0.85, top_p: 0.95, rep: 1.05 },
+      qwen3_clone: { temp: 0.95, top_p: 0.82, rep: 1.5 },
+      maya1: { temp: 0.42, top_p: 0.88, rep: 1.15 },
+      chatterbox: { temp: 0.8, top_p: 1.0, rep: 1.2 },
+    };
+    const ENGINE_COPY = {
+      qwen3_voicedesign: ['Voice Design', 'Invent a voice from a description'],
+      maya1: ['Acting', 'Description plus inline tags like <laugh>'],
+      qwen3_clone: ['Qwen3 Clone', 'Speak as a locked voice'],
+      chatterbox: ['Chatterbox', 'Clone with an emotion dial'],
+    };
+    const TRAITS = [
+      ['Fast and snappy', 'fast brisk conversational pacing, snappy delivery', true],
+      ['Urgent', 'urgent rapid-fire speaking pace', true],
+      ['Deep gravelly', 'deep gravelly baritone'], ['British', 'crisp British accent'], ['Scottish', 'Scottish accent'],
+      ['Studio mic', 'warm studio microphone presence'], ['Raspy', 'raspy and weathered'], ['Energetic', 'energetic and upbeat'],
+      ['Whisper', 'hushed intimate whisper'],
+    ];
+    const state = { model: 'qwen3_voicedesign', models: [], presets: [], tags: [], characters: [], takes: [], current: null, presetIdx: null, lockId: null };
+    const $ = (id) => document.getElementById(id);
+    const isClone = (m) => (state.models.find((x) => x.id === m) || {}).mode === 'voice_clone';
+
+    function renderEngines() {
+      const st = VF.engine || {};
+      $('enginePick').innerHTML = state.models.map((m) => {
+        const [title, sub] = ENGINE_COPY[m.id] || [m.name, m.badge || ''];
+        const off = m.available === false;
+        const loaded = st.active_model_id === m.id, loading = st.loading_model_id === m.id;
+        const stTxt = off ? 'Not installed' : loading ? 'Loading…' : loaded ? 'Loaded' : `~${m.vram_gb} GB`;
+        return `<button class="engine-opt ${state.model === m.id ? 'active' : ''}" ${off ? 'disabled' : ''} onclick="pickEngine('${m.id}')">
+          <b>${esc(title)}</b><span>${esc(sub)}</span>
+          <span class="state"><span class="dot ${loading ? 'busy' : loaded ? 'ok' : ''}"></span>${stTxt}</span>
+        </button>`;
+      }).join('');
+      $('engineHint').textContent = st.active_model_id && st.active_model_id !== state.model ? `Switching loads ${VF.shortName(state.model)} on generate` : '';
+    }
+
+    function pickEngine(id, { load = true } = {}) {
+      const prev = state.model;
+      state.model = id;
+      localStorage.setItem('vf.speak.model', id);
+      const clone = isClone(id);
+      $('voiceBlock').classList.toggle('hidden', !clone);
+      $('instructBlock').classList.toggle('hidden', clone);
+      $('presetBlock').classList.toggle('hidden', clone);
+      $('tagBlock').classList.toggle('hidden', id !== 'maya1');
+      resetSampling();
+      // Keep a preset's sample line in the right format when hopping between Qwen and Maya
+      const p = state.presets[state.presetIdx];
+      if (p && prev !== id && !clone) {
+        const cur = $('dialogueInput').value.trim();
+        if (cur === p.sample_text_qwen || cur === p.sample_text_maya) applyPreset(state.presetIdx, true);
+      }
+      renderEngines();
+      const st = VF.engine || {};
+      if (load && st.active_model_id !== id && !st.loading_model_id) VF.loadModel(id).catch(() => {});
+    }
+
+    function resetSampling() {
+      const d = DEFAULTS[state.model] || DEFAULTS.qwen3_voicedesign;
+      $('tempSlider').value = d.temp; $('topPSlider').value = d.top_p; $('repSlider').value = d.rep;
+      syncLabels();
+    }
+
+    function syncLabels() {
+      $('speedVal').textContent = (+$('speedSlider').value).toFixed(2) + 'x';
+      $('tempVal').textContent = (+$('tempSlider').value).toFixed(2);
+      $('topPVal').textContent = (+$('topPSlider').value).toFixed(2);
+      $('repVal').textContent = (+$('repSlider').value).toFixed(2);
+      const auto = $('samplingAuto').checked;
+      $('samplingGrid').style.opacity = auto ? 0.45 : 1;
+      ['tempSlider', 'topPSlider', 'repSlider'].forEach((i) => ($(i).disabled = auto));
+      $('samplingSummary').textContent = `${auto ? 'Auto' : `temp ${$('tempVal').textContent}`} · ${$('speedVal').textContent}`;
+    }
+
+    function renderPresets() {
+      $('presets').innerHTML = state.presets.map((p, i) => `<button class="chip ${state.presetIdx === i ? 'active' : ''}" title="${esc(p.category)}" onclick="applyPreset(${i})">${esc(p.name)}</button>`).join('');
+    }
+    function applyPreset(i, quiet) {
+      const p = state.presets[i];
+      if (!p) return;
+      state.presetIdx = i;
+      const maya = state.model === 'maya1';
+      $('instructInput').value = maya ? p.instruct_maya : p.instruct_qwen;
+      $('dialogueInput').value = maya ? p.sample_text_maya : p.sample_text_qwen;
+      renderPresets();
+      if (!quiet) VF.toast(`Loaded ${p.name}`);
+    }
+
+    function renderTraits() {
+      $('traits').innerHTML = TRAITS.map(([label, text, pace], i) => `<button class="chip" onclick="addTrait(${i})">${pace ? '' : '+ '}${esc(label)}</button>`).join('');
+    }
+    function addTrait(i) {
+      const [, trait, pace] = TRAITS[i];
+      const box = $('instructInput');
+      let cur = box.value.trim();
+      if (pace) cur = cur.replace(/slow (deliberate |unhurried |reflective |chilling )?(pacing|cadence)/gi, trait);
+      if (!cur.toLowerCase().includes(trait.toLowerCase())) cur = !cur ? trait : cur.endsWith('.') ? `${cur.slice(0, -1)}, ${trait}.` : `${cur}, ${trait}`;
+      box.value = cur;
+    }
+
+    function renderTags() {
+      $('mayaTags').innerHTML = state.tags.map((t) => `<button class="chip" title="${esc(t.category)}: ${esc(t.label)}" onclick="insertTag('${t.tag}')">${esc(t.tag)}</button>`).join('');
+    }
+    function insertTag(tag) {
+      const box = $('dialogueInput');
+      const s = box.selectionStart ?? box.value.length, e = box.selectionEnd ?? box.value.length;
+      const before = box.value.slice(0, s), after = box.value.slice(e);
+      const ins = (before && !before.endsWith(' ') ? ' ' : '') + tag + (after && !after.startsWith(' ') ? ' ' : '');
+      box.value = before + ins + after;
+      box.focus();
+      box.setSelectionRange((before + ins).length, (before + ins).length);
+    }
+
+    function renderCharacters() {
+      const sel = $('characterSelect');
+      const keep = sel.value || new URLSearchParams(location.search).get('voice') || localStorage.getItem('vf.speak.voice');
+      sel.innerHTML = state.characters.length
+        ? [...state.characters].sort((a, b) => a.name.localeCompare(b.name)).map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')
+        : '<option value="">No locked voices yet. Save a take as a voice first.</option>';
+      if (keep && state.characters.some((c) => c.id === keep)) sel.value = keep;
+    }
+
+    async function optimizePrompt() {
+      const concept = $('instructInput').value.trim();
+      if (!concept) return VF.toast('Type a rough idea first, like "sketchy cyberpunk merchant"');
+      try {
+        const d = await VF.api('/api/prompts/optimize', { method: 'POST', body: JSON.stringify({ concept, model_id: state.model, dialogue_text: $('dialogueInput').value.trim() }) });
+        const maya = state.model === 'maya1';
+        $('instructInput').value = maya ? d.instruct_maya : d.instruct_qwen;
+        if (!$('dialogueInput').value.trim()) $('dialogueInput').value = maya ? d.golden_sample_maya : d.golden_sample_qwen;
+        VF.toast('Expanded into a full voice description');
+      } catch (e) { VF.toast(`Couldn't expand: ${e.message}`); }
+    }
+
+    async function generate() {
+      const text = $('dialogueInput').value.trim();
+      const instruct = $('instructInput').value.trim();
+      const clone = isClone(state.model);
+      const character_id = clone ? $('characterSelect').value || null : null;
+      if (!text) return VF.toast('Write a line to say first');
+      if (!clone && !instruct) return VF.toast('Describe the voice first');
+      if (state.model === 'qwen3_clone' && !character_id) return VF.toast('Pick a locked voice (save a take as a voice first)');
+      if (character_id) localStorage.setItem('vf.speak.voice', character_id);
+      const auto = $('samplingAuto').checked;
+      const btn = $('generateBtn');
+      btn.disabled = true;
+      const started = Date.now();
+      const tick = setInterval(() => { btn.innerHTML = `<span class="spinner"></span> Generating… ${Math.round((Date.now() - started) / 1000)}s`; }, 300);
+      try {
+        const d = await VF.api('/api/synthesize', {
+          method: 'POST',
+          body: JSON.stringify({
+            model_id: state.model, text, instruct: clone ? '' : instruct, character_id,
+            language: $('languageSelect').value, speed: +$('speedSlider').value, trim_silence: $('trimSilence').checked,
+            temperature: auto ? null : +$('tempSlider').value, top_p: auto ? null : +$('topPSlider').value,
+            repetition_penalty: auto ? null : +$('repSlider').value,
+          }),
+        });
+        state.takes.unshift(d.take);
+        if (d.status) VF._setEngine({ ...d.status });
+        renderTakes();
+        showTake(d.take, true);
+        VF.toast(`${d.take.metrics.duration_sec}s of audio in ${d.take.metrics.elapsed_sec}s`);
+      } catch (e) {
+        VF.toast(`Generation failed: ${e.message}`, 7000);
+      } finally {
+        clearInterval(tick);
+        btn.disabled = false;
+        btn.textContent = 'Generate';
+      }
+    }
+
+    function showTake(t, play) {
+      state.current = t;
+      const p = $('player');
+      p.src = t.url;
+      if (play) p.play().catch(() => {});
+      $('monitorLabel').textContent = t.character_name ? `${t.character_name} · ${VF.shortName(t.model_id)}` : VF.shortName(t.model_id);
+      const m = t.metrics || {};
+      $('metrics').innerHTML = [
+        ['Length', `${m.duration_sec || 0}s`], ['Took', `${m.elapsed_sec || 0}s`],
+        m.pitch_hz_median ? ['Pitch', `${m.pitch_hz_median} Hz`] : null,
+        m.temperature != null ? ['Temp', m.temperature] : null,
+        m.exaggeration != null ? ['Emotion', m.exaggeration] : null,
+      ].filter(Boolean).map(([k, v]) => `<span class="metric">${k} <b>${v}</b></span>`).join('');
+      $('monitorActions').classList.remove('hidden');
+      $('downloadLink').href = t.url;
+      $('downloadLink').download = t.filename;
+      VF.drawWave($('wave'), t.url);
+    }
+
+    function renderTakes() {
+      const list = state.takes.slice(0, 12);
+      $('takes').innerHTML = list.length ? list.map((t) => `
+        <div class="item take">
+          <div class="row between nowrap"><b class="clip">${esc(t.character_name || VF.shortName(t.model_id))}</b><span class="dim">${esc(t.created_at || '')} · ${t.metrics?.duration_sec || 0}s</span></div>
+          <div class="t-text">“${esc(t.text)}”</div>
+          ${t.instruct ? `<div class="t-voice">${esc(t.instruct)}</div>` : ''}
+          <div class="row tight">
+            <button class="btn-sm" onclick="playTake('${t.id}')">Play</button>
+            <button class="btn-sm" onclick="reuseTake('${t.id}')">Reuse</button>
+            <button class="btn-sm" onclick="openLock('${t.id}')">Save as voice</button>
+            <span class="grow"></span>
+            <button class="btn-sm ghost danger" title="Delete take" onclick="deleteTake('${t.id}')">Delete</button>
+          </div>
+        </div>`).join('') : '<div class="empty">No takes yet. Pick an archetype and press Generate.</div>';
+    }
+    const findTake = (id) => state.takes.find((t) => t.id === id);
+    function playTake(id) { const t = findTake(id); if (t) showTake(t, true); }
+    function reuseTake(id) {
+      const t = findTake(id);
+      if (!t) return;
+      if (t.model_id && t.model_id !== state.model && state.models.some((m) => m.id === t.model_id)) pickEngine(t.model_id);
+      if (t.instruct) $('instructInput').value = t.instruct;
+      if (t.text) $('dialogueInput').value = t.text;
+      if (t.character_id) $('characterSelect').value = t.character_id;
+      showTake(t, false);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    async function deleteTake(id) {
+      try {
+        const d = await VF.api(`/api/takes/${id}`, { method: 'DELETE' });
+        state.takes = d.takes;
+        renderTakes();
+      } catch (e) { VF.toast(e.message); }
+    }
+
+    function openLock(id) {
+      if (!id) return;
+      state.lockId = id;
+      $('lockName').value = '';
+      $('lockDesc').value = findTake(id)?.instruct || '';
+      $('lockModal').classList.add('show');
+      $('lockName').focus();
+    }
+    function closeLock() { $('lockModal').classList.remove('show'); }
+    async function confirmLock() {
+      const name = $('lockName').value.trim();
+      if (!name) return VF.toast('Give the voice a name');
+      try {
+        const d = await VF.api('/api/characters/from-take', { method: 'POST', body: JSON.stringify({ take_id: state.lockId, name, description: $('lockDesc').value.trim() }) });
+        state.characters = d.characters;
+        renderCharacters();
+        closeLock();
+        VF.toast(`Saved “${name}” to the Voice Library`);
+      } catch (e) { VF.toast(e.message); }
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !$('generateBtn').disabled) { e.preventDefault(); generate(); }
+      if (e.key === 'Escape') closeLock();
+    });
+    window.addEventListener('vf:engine', (e) => {
+      if (e.detail && e.detail.models && !state.models.length) { state.models = e.detail.models; renderEngines(); }
+      else renderEngines();
+    });
+
+    (async function init() {
+      try {
+        const st = await VF.api('/api/status');
+        state.models = st.models || [];
+        state.presets = st.presets || [];
+        state.tags = st.maya1_tags || [];
+        state.characters = st.characters || [];
+        state.takes = st.takes || [];
+      } catch (e) {
+        VF.toast(`Studio not reachable: ${e.message}`);
+      }
+      renderTraits(); renderPresets(); renderTags(); renderCharacters(); renderTakes();
+      const q = new URLSearchParams(location.search);
+      let start = q.get('engine') || (q.get('voice') ? 'qwen3_clone' : null) || localStorage.getItem('vf.speak.model') || 'qwen3_voicedesign';
+      if (!state.models.some((m) => m.id === start && m.available !== false)) start = 'qwen3_voicedesign';
+      pickEngine(start, { load: false });
+      if (!isClone(start) && state.presets.length) applyPreset(0, true);
+      if (state.takes[0]) showTake(state.takes[0], false);
+    })();
+  </script>
+</body>
+</html>

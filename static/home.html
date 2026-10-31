@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VoiceForge Studio</title>
+  <link rel="stylesheet" href="/static/ui.css" />
+  <style>
+    .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+    .tile { text-decoration: none; display: flex; flex-direction: column; gap: 6px; padding: 16px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); transition: border-color 0.12s, background 0.12s; }
+    .tile:hover { border-color: var(--accent); background: var(--surface-2); }
+    .tile b { font-size: 14px; font-weight: 650; }
+    .tile span { color: var(--text-2); font-size: 12.5px; }
+    .tile .go { color: var(--accent); font-size: 12px; font-weight: 600; margin-top: auto; padding-top: 6px; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+    @media (max-width: 1000px) { .two { grid-template-columns: 1fr; } }
+    .mini { display: flex; flex-direction: column; gap: 6px; }
+  </style>
+</head>
+<body>
+  <header class="page-head">
+    <div>
+      <h1>VoiceForge Studio</h1>
+      <p>Local voice design, cloning and multi-character scenes.</p>
+    </div>
+    <div class="page-actions">
+      <a class="btn primary" href="/cast">New scene</a>
+    </div>
+  </header>
+
+  <div class="page stack" style="gap: 20px;">
+    <section class="card"><div class="stats" id="stats"></div></section>
+
+    <div class="tiles">
+      <a class="tile" href="/cast"><b>Casting Desk</b><span>Paste a sketch, let Claude pull out the characters, cast each one and render the whole scene.</span><span class="go">Open →</span></a>
+      <a class="tile" href="/studio"><b>Speak</b><span>Try one line with any engine: invent a voice, act with tags, or speak as a locked voice.</span><span class="go">Open →</span></a>
+      <a class="tile" href="/clone"><b>Clone Studio</b><span>Record a person in each emotion, so scenes pick the right clip for every line.</span><span class="go">Open →</span></a>
+      <a class="tile" href="/voices"><b>Voice Library</b><span>Listen to, rename, tag and tidy every locked voice.</span><span class="go">Open →</span></a>
+      <a class="tile" href="/scenes"><b>Scenes</b><span>Render from a plain script, re-take single lines, export game bundles.</span><span class="go">Open →</span></a>
+      <a class="tile" href="/engines"><b>Engines</b><span>Switch between Qwen3, Maya-1 and Chatterbox, and keep an eye on memory.</span><span class="go">Open →</span></a>
+    </div>
+
+    <div class="two">
+      <section class="card">
+        <div class="card-title"><h2>Recent scenes</h2><a class="hint" href="/scenes">All scenes</a></div>
+        <div class="mini" id="scenes"></div>
+      </section>
+      <section class="card">
+        <div class="card-title"><h2>Recent takes</h2><a class="hint" href="/history">All takes</a></div>
+        <div class="mini" id="takes"></div>
+      </section>
+    </div>
+  </div>
+
+  <script src="/static/ui.js"></script>
+  <script>
+    const esc = VF.esc;
+    const $ = (id) => document.getElementById(id);
+    (async function init() {
+      let st = {}, profiles = [];
+      try {
+        [st, profiles] = await Promise.all([VF.api('/api/status'), VF.api('/api/profiles').then((d) => d.profiles || []).catch(() => [])]);
+      } catch (e) {
+        $('stats').innerHTML = `<div class="warn-box">Studio not reachable: ${esc(e.message)}</div>`;
+        return;
+      }
+      const stat = (v, l, href) => `<a class="stat" href="${href}" style="text-decoration:none;"><b>${v}</b><span>${l}</span></a>`;
+      $('stats').innerHTML = [
+        stat((st.characters || []).length, 'Locked voices', '/voices'),
+        stat(profiles.length, 'People in Clone Studio', '/clone'),
+        stat((st.scenes || []).length, 'Recent scenes', '/scenes'),
+        stat((st.takes || []).length, 'Recent takes', '/history'),
+        stat(esc(st.active_model_id ? VF.shortName(st.active_model_id) : 'None'), 'Engine loaded', '/engines'),
+      ].join('');
+      const scenes = (st.scenes || []).slice(0, 5);
+      $('scenes').innerHTML = scenes.length ? scenes.map((s) => `
+        <div class="item" style="gap: 6px;">
+          <div class="row between nowrap"><b class="clip">${esc(s.title)}</b><span class="dim">${s.line_count} lines · ${s.duration_sec}s</span></div>
+          <audio controls preload="none" src="${s.url}"></audio>
+          <div class="row tight"><a class="btn-sm" href="/cast?scene=${s.id}">Open in Casting Desk</a><a class="btn-sm ghost" href="/scenes?open=${s.id}">Edit lines</a></div>
+        </div>`).join('') : '<div class="empty">No scenes yet. Start one on the Casting Desk.</div>';
+      const takes = (st.takes || []).slice(0, 6);
+      $('takes').innerHTML = takes.length ? takes.map((t) => `
+        <div class="item" style="gap: 6px;">
+          <div class="row between nowrap"><b class="clip">${esc(t.character_name || VF.shortName(t.model_id))}</b><span class="dim">${esc(t.created_at || '')}</span></div>
+          <div class="muted clip">“${esc(t.text)}”</div>
+          <audio controls preload="none" src="${t.url}"></audio>
+        </div>`).join('') : '<div class="empty">No takes yet.</div>';
+    })();
+  </script>
+</body>
+</html>

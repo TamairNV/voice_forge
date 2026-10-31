@@ -142,11 +142,15 @@ engine = VoiceForgeEngine()
 # Pydantic Schemas (Documented for LLM Tool Use & OpenAPI)
 # ============================================================================
 
+# Engines that speak with a locked voice's reference clip
+CLONE_ENGINES = ("qwen3_clone", "chatterbox")
+
+
 class LoadModelRequest(BaseModel):
     model_id: str = Field(
         ...,
-        description="Target engine ID to load into Metal VRAM: 'qwen3_voicedesign', 'maya1', or 'qwen3_clone'.",
-        examples=["qwen3_voicedesign", "maya1", "qwen3_clone"],
+        description="Target engine ID to load: 'qwen3_voicedesign', 'maya1', 'qwen3_clone', or 'chatterbox' (see /api/models).",
+        examples=["qwen3_voicedesign", "maya1", "qwen3_clone", "chatterbox"],
     )
 
 
@@ -447,6 +451,10 @@ class SceneRenderRequest(BaseModel):
             "Vary the gap after lines that have no explicit `pause_after_ms`: quick replies, a beat after questions and "
             "emotion shifts, longer after trailing-off '...', and an overlap when a line is cut off with '—'. Scaled by `default_pause_ms`."
         ),
+    )
+    clone_model_id: str = Field(
+        "qwen3_clone",
+        description="Engine used for lines spoken by locked voices: 'qwen3_clone' (default) or 'chatterbox' (needs .venv-chatterbox). A line's own `model_id='chatterbox'` also picks it.",
     )
     takes_per_line: int = Field(
         1,
@@ -1326,7 +1334,9 @@ def _parse_script_text_to_lines(script_text: str) -> List[SceneLineItem]:
                 ref_text = ref_t_m.group(1).strip().strip('"').strip("'")
 
             if directives:
-                if "maya" in directives:
+                if "chatterbox" in directives:
+                    model_id = "chatterbox"
+                elif "maya" in directives:
                     model_id = "maya1"
                 elif "clone" in directives:
                     model_id = "qwen3_clone"
@@ -1879,7 +1889,9 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
         if has_locked:
             if l.model_id == "maya1" and has_maya_vocal_tag:
                 return "maya1"
-            return "qwen3_clone"
+            if l.model_id in CLONE_ENGINES:
+                return l.model_id
+            return req.clone_model_id if req.clone_model_id in CLONE_ENGINES else "qwen3_clone"
         if l.model_id == "maya1":
             return "maya1"
         if l.model_id == "qwen3_voicedesign":
@@ -1919,13 +1931,13 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
             model_swaps += 1
             last_used_model = target_eng
 
-        if target_eng == "qwen3_clone" and existing_char is not None:
+        if target_eng in CLONE_ENGINES and existing_char is not None:
             n_takes = 1 if line_seed is not None else req.takes_per_line
             candidates = []
             for k in range(n_takes):
                 candidates.append(_run_synthesis_and_save(
                     SynthesizeRequest(
-                        model_id="qwen3_clone",
+                        model_id=target_eng,
                         character_id=existing_char["id"],
                         text=line.text.strip(),
                         speed=line_speed,
@@ -3624,5 +3636,26 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 def index():
-    index_file = STATIC_DIR / "index.html"
-    return index_file.read_text(encoding="utf-8")
+    return (STATIC_DIR / "home.html").read_text(encoding="utf-8")
+
+
+# Multi-page studio UI: every page shares static/ui.css + static/ui.js (sidebar, engine switcher, player)
+_UI_PAGES = {"studio": "studio.html", "scenes": "scenes.html", "history": "history.html", "engines": "engines.html"}
+
+
+def _ui_page(name: str):
+    def page():
+        return (STATIC_DIR / _UI_PAGES[name]).read_text(encoding="utf-8")
+    return page
+
+
+for _name in _UI_PAGES:
+    app.add_api_route(f"/{_name}", _ui_page(_name), methods=["GET"], response_class=HTMLResponse, include_in_schema=False)
+
+
+@app.get("/api/engine", tags=["Model Management"])
+def api_engine_status():
+    """Lightweight engine state (active/loading model, memory, available models) without the takes/characters lists."""
+    status = engine.get_status()
+    status.pop("maya1_tags", None)
+    return status
