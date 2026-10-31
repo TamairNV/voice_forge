@@ -201,8 +201,36 @@
     }
     async function updateProfile(field, value) {
       const p = active();
-      try { const d = await api(`/api/profiles/${p.id}`, { method: 'PATCH', body: JSON.stringify({ [field]: value }) }); state.profiles = d.profiles; renderProfiles(); }
+      try {
+        const d = await api(`/api/profiles/${p.id}`, { method: 'PATCH', body: JSON.stringify({ [field]: value }) });
+        state.profiles = d.profiles; renderProfiles();
+        if (field === 'engine') renderProfile();
+      }
       catch (e) { toast('Failed: ' + e.message); }
+    }
+    // Engine for this person's lines, and Chatterbox's anchor/emotion dial (0 = neutral clip only, 1 = emotion clip only)
+    function engineSettings(p) {
+      const engine = p.engine || 'qwen3_clone';
+      const blend = p.emotion_blend ?? 0.35, shout = p.shout_blend ?? 0.25;
+      const slider = (field, val, label) => `
+        <label class="field" style="margin-top: 6px;"><span>${label}</span><span id="${field}Val">${Math.round(val * 100)}%</span></label>
+        <input type="range" min="0" max="1" step="0.05" value="${val}" oninput="$('${field}Val').textContent = Math.round(this.value * 100) + '%'" onchange="updateProfile('${field}', parseFloat(this.value))" />`;
+      return `
+        <div class="row" style="margin-top: 10px; align-items: flex-start;">
+          <div style="min-width: 200px;">
+            <label class="field" style="margin-top: 0;"><span>Engine</span></label>
+            <select onchange="updateProfile('engine', this.value)">
+              <option value="qwen3_clone" ${engine === 'qwen3_clone' ? 'selected' : ''}>Qwen3 Clone: closest to your voice</option>
+              <option value="chatterbox" ${engine === 'chatterbox' ? 'selected' : ''}>Chatterbox: more emotion</option>
+            </select>
+          </div>
+          ${engine === 'chatterbox' ? `
+          <div style="flex: 1; min-width: 220px;">
+            ${slider('emotion_blend', blend, 'Emotion blend')}
+            ${slider('shout_blend', shout, 'Shouting lines')}
+            <div class="dim">Each line mixes your Neutral clip (steady, one consistent voice) with that line's emotion clip (more feeling, but the voice drifts). 35% is the tested sweet spot; shouting drifts first, so it sits lower. Every line is rendered 3 times and the take closest to your Neutral voice is kept.</div>
+          </div>` : ''}
+        </div>`;
     }
     async function deleteProfile() {
       const p = active();
@@ -231,6 +259,7 @@
             <button class="btn-sm rose" onclick="deleteProfile()">🗑</button>
           </div>
           <input type="text" style="margin-top: 8px;" placeholder="Notes about this voice (optional), e.g. 'my natural voice, slight Midlands accent'" value="${escapeHtml(p.description || '')}" onchange="updateProfile('description', this.value)" />
+          ${engineSettings(p)}
           <div class="row" style="margin-top: 10px;">
             <span class="badge ${done ? 'ok' : 'warn'}">${done} of ${state.emotions.length} emotions recorded</span>
             ${nextEmpty ? `<button class="btn-sm" onclick="document.getElementById('slot_${nextEmpty.id}').scrollIntoView({behavior: 'smooth', block: 'center'})">Next to record: ${nextEmpty.icon} ${nextEmpty.label}</button>` : '<span class="badge ok">All emotions covered 🎉</span>'}
@@ -524,7 +553,9 @@
       const old = btn ? btn.innerHTML : '';
       if (btn) { btn.innerHTML = '<span class="spinner"></span>'; btn.disabled = true; }
       try {
-        const d = await api('/api/synthesize', { method: 'POST', body: JSON.stringify({ model_id: 'qwen3_clone', character_id: voiceId, text, temperature: TEST_TEMP }) });
+        const engine = (active() || {}).engine || 'qwen3_clone';
+        const body = engine === 'chatterbox' ? { model_id: engine, character_id: voiceId, text } : { model_id: engine, character_id: voiceId, text, temperature: TEST_TEMP };
+        const d = await api('/api/synthesize', { method: 'POST', body: JSON.stringify(body) });
         play(d.take.url, label);
       } catch (e) { toast('Failed: ' + e.message, 6000); }
       if (btn) { btn.innerHTML = old; btn.disabled = false; }

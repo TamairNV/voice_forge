@@ -78,6 +78,7 @@ To generate a complete multi-character game skit in a single call, send `POST ht
   - `Speaker [ref: /path/to/audio.wav]: Dialogue text using cloned voice from recording`
   - `Speaker [blend: Speaker (Sad)]: Dialogue` — emotion blend: joins a second clip of the same person onto the voice's reference so the read lands between the two emotions. Add `strong` (`[blend: Speaker (Sad) strong]`) to let the blend clip lead. Also `blend_with` / `blend_strength` on `lines` and `/api/synthesize`.
   - `Speaker (furious): Dialogue` — a short parenthetical is an acting direction. If `Speaker` is a Clone Studio profile (or cast as `{"profile": "Name"}`), each line automatically uses that person's closest emotion clip (from `emotion`, the direction, or ALL-CAPS text = shouting). A direction like `(cuts in)` / `(interrupts)` overlaps the line onto the previous one.
+  - Chatterbox profile lines: `[blend 0.5]` (or `[blend 50%]`) sets how much of the line's emotion clip is mixed with the profile's Neutral clip (0 = steadiest voice, 1 = most emotion but the voice drifts; default 0.35, shouting 0.25). Engine per profile is set in Clone Studio, or force it with `clone_model_id` / `[chatterbox]`. Write shouting as normal case with `!` for Chatterbox; ALL-CAPS words are converted to normal case before it speaks.
   - Standalone timing lines between turns:
     - `[Pause: 450ms]` or `[pause 1.5s]` — adds a dramatic silence beat after the previous line.
     - `[Overlap: 220ms]` — makes the next speaker interrupt 220ms *before* the previous line finishes!

@@ -42,6 +42,8 @@ from engine import (
     sanitize_dialogue_for_model,
     optimize_character_prompts,
     _emotion_temperature_boost,
+    CHATTERBOX_DEFAULT_BLEND,
+    CHATTERBOX_SHOUT_BLEND,
 )
 
 BASE_DIR = Path(__file__).parent.resolve()
@@ -225,6 +227,10 @@ class SynthesizeRequest(BaseModel):
         "subtle",
         description="'subtle' keeps this voice's emotion in front (blend clip heard first); 'strong' lets the blend clip lead (heard last, which pulls hardest).",
     )
+    emotion_blend: Optional[float] = Field(
+        None, ge=0.0, le=1.0,
+        description="Chatterbox + Clone Studio profile only: anchor/emotion blend, 0 = the profile's neutral clip only (steadiest), 1 = this line's emotion clip only (most emotion, voice drifts). Defaults to the profile's setting (0.35, shouting 0.25).",
+    )
 
 
 class DesignAndLockRequest(BaseModel):
@@ -358,6 +364,10 @@ class SceneLineItem(BaseModel):
         None,
         description="Short acting direction, e.g. 'panicking', 'whispers', 'cuts in'. For profile speakers it picks the emotion clip when `emotion` is omitted; 'interrupts' / 'cuts in' overlaps this line onto the previous one.",
     )
+    emotion_blend: Optional[float] = Field(
+        None, ge=0.0, le=1.0,
+        description="Chatterbox + Clone Studio profile only: anchor/emotion blend, 0 = the profile's neutral clip only (steadiest), 1 = this line's emotion clip only (most emotion, voice drifts). Defaults to the profile's setting (0.35, shouting 0.25). In script_text: `[blend 0.5]` or `[blend 50%]`.",
+    )
 
 
 class RerollSceneLineRequest(BaseModel):
@@ -374,6 +384,7 @@ class RerollSceneLineRequest(BaseModel):
     seed: Optional[int] = Field(None, description="Optional random seed override (pass a new integer to force a different vocal inflection take).")
     blend_with: Optional[str] = Field(None, description="Emotion blend voice for this line. Omit to keep the line's current blend; pass '' to remove it.")
     blend_strength: Optional[str] = Field(None, description="'subtle' or 'strong'. Omit to keep the current setting.")
+    emotion_blend: Optional[float] = Field(None, ge=0.0, le=1.0, description="Chatterbox profile lines: anchor/emotion blend (0-1). Omit to keep the line's current value.")
 
 
 class SceneRenderRequest(BaseModel):
@@ -452,9 +463,22 @@ class SceneRenderRequest(BaseModel):
             "emotion shifts, longer after trailing-off '...', and an overlap when a line is cut off with '—'. Scaled by `default_pause_ms`."
         ),
     )
-    clone_model_id: str = Field(
-        "qwen3_clone",
-        description="Engine used for lines spoken by locked voices: 'qwen3_clone' (default) or 'chatterbox' (needs .venv-chatterbox). A line's own `model_id='chatterbox'` also picks it.",
+    clone_model_id: Optional[str] = Field(
+        None,
+        description=(
+            "Engine used for lines spoken by locked voices: 'qwen3_clone' or 'chatterbox' (needs .venv-chatterbox). "
+            "Omit to use each Clone Studio profile's own engine setting (Qwen3 Clone for everything else). "
+            "A line's own `model_id` overrides both."
+        ),
+    )
+    chatterbox_takes: int = Field(
+        3,
+        ge=1,
+        le=5,
+        description=(
+            "Chatterbox profile lines: render this many takes (or `takes_per_line` if higher) and keep the one whose voice "
+            "is closest to the profile's neutral clip (speaker similarity, reported per take). Takes that miss words are skipped."
+        ),
     )
     takes_per_line: int = Field(
         1,
@@ -694,6 +718,8 @@ def _run_synthesis_and_save(req: SynthesizeRequest) -> dict:
             blend_text = bchar.get("ref_text")
             blend_name = bchar["name"]
 
+    chatterbox_opts = _chatterbox_profile_opts(resolved_char_id, req.emotion_blend) if req.model_id == "chatterbox" else None
+
     prev_audio_path = req.prev_audio_path
     prev_text = req.prev_text
     if req.prev_take_id and not prev_audio_path:
@@ -723,6 +749,7 @@ def _run_synthesis_and_save(req: SynthesizeRequest) -> dict:
             blend_audio_path=blend_audio_path,
             blend_text=blend_text,
             blend_strength="strong" if req.blend_strength == "strong" else "subtle",
+            chatterbox_opts=chatterbox_opts,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1304,6 +1331,14 @@ def _parse_script_text_to_lines(script_text: str) -> List[SceneLineItem]:
             # `[blend: Tamair (Sad)]` or `[blend: Tamair (Sad) strong]`: mix in a second emotion clip
             blend_with = None
             blend_strength = "subtle"
+            # `[blend 0.5]` / `[blend: 35%]`: anchor/emotion dial for Chatterbox profile lines
+            emotion_blend = None
+            eb_m = re.search(r"blend\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(%?)(?=\s*(?:,|$))", raw_directives, re.IGNORECASE)
+            if eb_m:
+                val = float(eb_m.group(1))
+                emotion_blend = max(0.0, min(1.0, val / 100 if eb_m.group(2) or val > 1 else val))
+                raw_directives = raw_directives[: eb_m.start()] + raw_directives[eb_m.end():]
+                directives = re.sub(r"blend\s*[:=]?\s*\d+(?:\.\d+)?\s*%?", "", directives, flags=re.IGNORECASE)
             bl_m = re.search(r"blend\s*(?:with)?\s*[:=]\s*([^,\]]+)", raw_directives, re.IGNORECASE)
             if bl_m:
                 bl = bl_m.group(1).strip()
@@ -1392,6 +1427,7 @@ def _parse_script_text_to_lines(script_text: str) -> List[SceneLineItem]:
                         ref_text=ref_text,
                         blend_with=blend_with,
                         blend_strength=blend_strength,
+                        emotion_blend=emotion_blend,
                     )
                 )
 
@@ -1647,7 +1683,17 @@ def _score_take(take: dict, text: str, char: dict) -> Tuple[float, dict]:
 
 def _pick_best_take(candidates: List[dict], text: str, char: dict) -> dict:
     scored = [(_score_take(t, text, char), t) for t in candidates]
-    (best_score, best_info), best = max(scored, key=lambda x: x[0][0])
+    sims = [t["metrics"].get("speaker_similarity") for t in candidates]
+    for ((_, info), _t), sim in zip(scored, sims):
+        if sim is not None:
+            info["speaker_similarity"] = sim
+    if all(sim is not None for sim in sims):
+        # Chatterbox profile lines: consistency first. Keep the take whose voice is closest to the anchor,
+        # among the takes that got the words right.
+        worded = [x for x in scored if x[0][1]["match"] >= 0.6] or scored
+        (best_score, best_info), best = max(worded, key=lambda x: x[1]["metrics"]["speaker_similarity"])
+    else:
+        (best_score, best_info), best = max(scored, key=lambda x: x[0][0])
     best = dict(best)
     best["candidates"] = [{"take_id": t["id"], "url": t["url"], **info} for (_, info), t in scored]
     return best
@@ -1891,7 +1937,11 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
                 return "maya1"
             if l.model_id in CLONE_ENGINES:
                 return l.model_id
-            return req.clone_model_id if req.clone_model_id in CLONE_ENGINES else "qwen3_clone"
+            if req.clone_model_id in CLONE_ENGINES:
+                return req.clone_model_id
+            char = resolved_cast_map.get(s_key) or _resolve_character(l.speaker.strip())
+            prof = _profile_of_character(char)
+            return prof["engine"] if prof and prof.get("engine") in CLONE_ENGINES else "qwen3_clone"
         if l.model_id == "maya1":
             return "maya1"
         if l.model_id == "qwen3_voicedesign":
@@ -1933,6 +1983,8 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
 
         if target_eng in CLONE_ENGINES and existing_char is not None:
             n_takes = 1 if line_seed is not None else req.takes_per_line
+            if target_eng == "chatterbox" and line_seed is None and _profile_of_character(existing_char):
+                n_takes = max(n_takes, req.chatterbox_takes)
             candidates = []
             for k in range(n_takes):
                 candidates.append(_run_synthesis_and_save(
@@ -1951,6 +2003,7 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
                         prev_text=prev_text,
                         blend_with=line.blend_with,
                         blend_strength=line.blend_strength,
+                        emotion_blend=line.emotion_blend,
                     )
                 ))
             take = _pick_best_take(candidates, line.text, existing_char) if len(candidates) > 1 else candidates[0]
@@ -2026,6 +2079,8 @@ def _execute_scene_render(req: SceneRenderRequest) -> dict:
             "context_chained": bool(take["metrics"].get("context_chained", False)),
             "blend_with": line.blend_with if take["metrics"].get("blended") else None,
             "blend_strength": line.blend_strength if take["metrics"].get("blended") else None,
+            "emotion_blend": take["metrics"].get("emotion_blend"),
+            "speaker_similarity": take["metrics"].get("speaker_similarity"),
             "text": line.text.strip(),
             "instruct": instruct_used,
             "speed": line_speed,
@@ -2163,8 +2218,11 @@ def api_reroll_scene_line(scene_id: str, req: RerollSceneLineRequest):
         prev_take_id=prev_take_id,
         blend_with=(req.blend_with if req.blend_with is not None else target_seg.get("blend_with")) or None if model_id == "qwen3_clone" else None,
         blend_strength=req.blend_strength or target_seg.get("blend_strength") or "subtle",
+        emotion_blend=req.emotion_blend if req.emotion_blend is not None else target_seg.get("emotion_blend"),
     )
     new_take = _run_synthesis_and_save(synth_req)
+    target_seg["emotion_blend"] = new_take["metrics"].get("emotion_blend")
+    target_seg["speaker_similarity"] = new_take["metrics"].get("speaker_similarity")
     target_seg["blend_with"] = new_take.get("blend_with")
     target_seg["blend_strength"] = synth_req.blend_strength if new_take.get("blend_with") else None
 
@@ -3282,6 +3340,40 @@ def _profiles_with_clips() -> List[dict]:
     return out
 
 
+def _profile_of_character(char: Optional[dict]) -> Optional[dict]:
+    """The Clone Studio profile a locked voice belongs to (its clips resolved), or None."""
+    if not char or not char.get("profile_id"):
+        return None
+    return next((p for p in _profiles_with_clips() if p["id"] == char["profile_id"] and p.get("clips")), None)
+
+
+def _chatterbox_profile_opts(character_id: Optional[str], emotion_blend: Optional[float] = None) -> Optional[dict]:
+    """
+    Chatterbox on a profile clip: the profile's neutral clip is the anchor, this clip's emotion is blended in.
+    Blend: the line's value, else the profile's (`emotion_blend`, default 0.35; shouting `shout_blend`, default 0.25).
+    """
+    char = _resolve_character(character_id) if character_id else None
+    prof = _profile_of_character(char)
+    if not prof:
+        return None
+    clip = next((c for c in prof["clips"] if c["character_id"] == char["id"]), None)
+    anchor_clip = _pick_profile_clip(prof, "neutral")
+    anchor = _resolve_character(anchor_clip["character_id"]) if anchor_clip else None
+    if not clip or not anchor:
+        return None
+    emotion = clip["emotion"]
+    if emotion_blend is None:
+        if emotion == "shouting":
+            emotion_blend = prof.get("shout_blend", CHATTERBOX_SHOUT_BLEND)
+        else:
+            emotion_blend = prof.get("emotion_blend", CHATTERBOX_DEFAULT_BLEND)
+    return {
+        "anchor_audio_path": str(CHARACTERS_DIR / anchor["audio_file"]),
+        "emotion_blend": float(emotion_blend),
+        "emotion": emotion,
+    }
+
+
 def _save_profile(profile: dict) -> None:
     profiles = [p for p in _read_json(PROFILES_JSON, []) if p["id"] != profile["id"]]
     profiles.insert(0, profile)
@@ -3379,6 +3471,9 @@ class ProfileRequest(BaseModel):
 class ProfileUpdateRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    engine: Optional[str] = Field(None, description="Engine for this profile's lines when a scene doesn't pick one: 'qwen3_clone' or 'chatterbox'.")
+    emotion_blend: Optional[float] = Field(None, ge=0.0, le=1.0, description="Chatterbox anchor/emotion blend (0 = neutral clip only, 1 = emotion clip only). Default 0.35.")
+    shout_blend: Optional[float] = Field(None, ge=0.0, le=1.0, description="Blend for shouting lines, which drift first. Default 0.25.")
 
 
 class LinkClipRequest(BaseModel):
@@ -3426,12 +3521,20 @@ def api_create_profile(req: ProfileRequest):
 
 @app.patch("/api/profiles/{profile_id}", tags=["Clone Studio"])
 def api_update_profile(profile_id: str, req: ProfileUpdateRequest):
-    """Rename a profile or edit its description."""
+    """Rename a profile, edit its description, or set its engine and Chatterbox emotion blend."""
     p = _get_profile(profile_id)
     if req.name is not None and req.name.strip():
         p["name"] = req.name.strip()
     if req.description is not None:
         p["description"] = req.description.strip()
+    if req.engine is not None:
+        if req.engine not in CLONE_ENGINES:
+            raise HTTPException(status_code=400, detail=f"engine must be one of {', '.join(CLONE_ENGINES)}.")
+        p["engine"] = req.engine
+    if req.emotion_blend is not None:
+        p["emotion_blend"] = round(req.emotion_blend, 2)
+    if req.shout_blend is not None:
+        p["shout_blend"] = round(req.shout_blend, 2)
     _save_profile(p)
     return {"profiles": _profiles_with_clips()}
 

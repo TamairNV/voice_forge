@@ -365,6 +365,43 @@ CHATTERBOX_PYTHON = Path(os.environ.get(
     "VOICEFORGE_CHATTERBOX_PYTHON", str(Path(__file__).resolve().parent / ".venv-chatterbox" / "bin" / "python")
 ))
 CHATTERBOX_DEFAULTS = {"temperature": 0.8, "top_p": 1.0, "repetition_penalty": 1.2, "exaggeration": 0.5, "cfg_weight": 0.5}
+# Clone Studio profile lines: (exaggeration, cfg_weight) per emotion clip, from Tamair's blind tests (blend_35, 2026-10-31).
+# Emotions not listed use (0.5, 0.5).
+CHATTERBOX_EMOTION_SETTINGS = {
+    "angry": (0.7, 0.4), "excited": (0.7, 0.4), "scared": (0.7, 0.4), "shouting": (0.75, 0.4),
+    "pleading": (0.65, 0.45), "annoyed": (0.6, 0.5), "sarcastic": (0.55, 0.5), "happy": (0.6, 0.5),
+}
+# Anchor + emotion blend: 0 = the profile's neutral clip only, 1 = the line's emotion clip only
+CHATTERBOX_DEFAULT_BLEND = 0.35
+CHATTERBOX_SHOUT_BLEND = 0.25  # shouting drifts first, so it sits lower on the dial
+
+
+_CAPS_COMMON_WORDS = set(
+    "a an and are be but can did do don't get go got had has he her hey him his how i'm it its let me my no not now "
+    "of off oh oi ok on one out own run say see she so the too two up us was way we who why yes yet you".split()
+)
+
+
+def chatterbox_normalize_caps(text: str) -> str:
+    """Chatterbox spells out ALL-CAPS words letter by letter; give it normal case and leave the shouting to '!'.
+    Short caps words in an otherwise normal sentence are kept, since they are usually acronyms ("BBC")."""
+    def fix_sentence(sent: str) -> str:
+        letters = [c for c in sent if c.isalpha()]
+        shouted = bool(letters) and sum(c.isupper() for c in letters) / len(letters) > 0.6
+
+        def fix(m: re.Match) -> str:
+            word = m.group(0)
+            if word == "I" or (len(word) <= 3 and not shouted and word.lower() not in _CAPS_COMMON_WORDS):
+                return word
+            first = not sent[: m.start()].strip(" \"'\u201c(")
+            return word.capitalize() if first else word.lower()
+        return re.sub(r"\b[A-Z][A-Z']+\b", fix, sent)
+    return "".join(fix_sentence(part) for part in re.split(r"(?<=[.!?])(\s+)", text))
+
+
+# The worker sits at ~8 GB and its MPS memory creeps up take after take even with the cache cleared (14-15 GB after 12 takes in testing).
+# Past this footprint the runner restarts it between lines (~15 s reload).
+CHATTERBOX_RECYCLE_GB = float(os.environ.get("VOICEFORGE_CHATTERBOX_RECYCLE_GB", "12"))
 
 
 def chatterbox_available() -> bool:
@@ -624,6 +661,10 @@ class ChatterboxRunner:
     def __init__(self):
         if not chatterbox_available():
             raise RuntimeError(f"Chatterbox venv not found at {CHATTERBOX_PYTHON}. Create .venv-chatterbox and pip install chatterbox-tts.")
+        self.restarts = 0
+        self._start()
+
+    def _start(self) -> None:
         worker = Path(__file__).resolve().parent / "chatterbox_worker.py"
         self.proc = subprocess.Popen(
             [str(CHATTERBOX_PYTHON), str(worker)],
@@ -655,6 +696,12 @@ class ChatterboxRunner:
             resp = self._read()
             if not resp.get("ok"):
                 raise RuntimeError(f"Chatterbox: {resp.get('error')}")
+            self.last_response = resp
+            if (resp.get("footprint_gb") or 0) > CHATTERBOX_RECYCLE_GB > 0:
+                print(f"[voiceforge] Chatterbox worker at {resp['footprint_gb']} GB, restarting it to free memory", flush=True)
+                self.close()
+                self._start()
+                self.restarts += 1
             audio, sr = sf.read(out_path, dtype="float32")
             if audio.ndim > 1:
                 audio = audio.mean(axis=1)
@@ -1244,7 +1291,9 @@ class VoiceForgeEngine:
         blend_audio_path: Optional[str] = None,
         blend_text: Optional[str] = None,
         blend_strength: str = "subtle",
+        chatterbox_opts: Optional[Dict[str, Any]] = None,
     ) -> Tuple[np.ndarray, int, Dict[str, Any]]:
+        """`chatterbox_opts` (Chatterbox only): {anchor_audio_path, emotion_blend, emotion} for Clone Studio profile lines."""
         with self._lock:
             # Swap inside the lock so a concurrent request can't change the model under us
             if self.active_model_id != model_id or self.active_model is None:
@@ -1254,7 +1303,7 @@ class VoiceForgeEngine:
                 return self._synthesize_locked(
                     model_id, text, instruct, language, speed, trim_silence, temperature, top_p,
                     repetition_penalty, seed, ref_audio_path, ref_text, prev_audio_path, prev_text,
-                    dynamic_temperature, blend_audio_path, blend_text, blend_strength,
+                    dynamic_temperature, blend_audio_path, blend_text, blend_strength, chatterbox_opts,
                 )
             finally:
                 self.last_used = time.time()
@@ -1263,23 +1312,41 @@ class VoiceForgeEngine:
 
     def _synthesize_chatterbox(
         self, raw_text, clean_text, extracted_tags, ref_audio_path, speed, trim_silence, temperature, top_p,
-        repetition_penalty, seed, dynamic_temperature, t0,
+        repetition_penalty, seed, dynamic_temperature, t0, opts,
     ) -> Tuple[np.ndarray, int, Dict[str, Any]]:
         d = CHATTERBOX_DEFAULTS
         temp = temperature if temperature is not None else d["temperature"]
-        # Chatterbox's own emotion dial: lean into charged lines instead of raising temperature
-        boost = _emotion_temperature_boost(raw_text, extracted_tags) if dynamic_temperature else 0.0
-        exaggeration = round(min(d["exaggeration"] + boost * 2.0, 0.9), 2)
+        clean_text = chatterbox_normalize_caps(clean_text)
+        emotion = opts.get("emotion")
+        anchor = opts.get("anchor_audio_path")
+        blend = None
+        if emotion:
+            # Profile line: the emotion clip sets the dials (tested per emotion), not the text
+            exaggeration, cfg = CHATTERBOX_EMOTION_SETTINGS.get(emotion, (d["exaggeration"], d["cfg_weight"]))
+        else:
+            # Chatterbox's own emotion dial: lean into charged lines instead of raising temperature
+            boost = _emotion_temperature_boost(raw_text, extracted_tags) if dynamic_temperature else 0.0
+            exaggeration = round(min(d["exaggeration"] + boost * 2.0, 0.9), 2)
+            # Lower CFG gives more natural pacing when exaggeration is high
+            cfg = d["cfg_weight"] if exaggeration <= 0.6 else 0.35
+        if anchor and ref_audio_path and anchor != ref_audio_path:
+            blend = opts.get("emotion_blend")
+            if blend is None:
+                blend = CHATTERBOX_SHOUT_BLEND if emotion == "shouting" else CHATTERBOX_DEFAULT_BLEND
+            blend = round(max(0.0, min(1.0, float(blend))), 2)
         params = {
             "temperature": temp,
             "top_p": top_p if top_p is not None else d["top_p"],
             "repetition_penalty": repetition_penalty if repetition_penalty is not None else d["repetition_penalty"],
             "exaggeration": exaggeration,
-            # Lower CFG gives more natural pacing when exaggeration is high
-            "cfg_weight": d["cfg_weight"] if exaggeration <= 0.6 else 0.35,
+            "cfg_weight": cfg,
             "seed": seed,
         }
+        if blend is not None:
+            params.update(anchor_path=anchor, emotion_blend=blend)
         audio_np, sr = self.active_model.generate(clean_text, ref_audio_path, **params)
+        worker_resp = getattr(self.active_model, "last_response", {})
+        similarity = worker_resp.get("speaker_similarity")
         audio_np = apply_studio_pacing(audio_np, sr, speed=speed, trim_silence=trim_silence)
         elapsed = time.perf_counter() - t0
         duration = audio_np.shape[0] / sr
@@ -1298,13 +1365,18 @@ class VoiceForgeEngine:
             "seed": seed,
             "context_chained": False,
             "voice_locked": bool(ref_audio_path),
+            "emotion": emotion,
+            "emotion_blend": blend,
+            "speaker_similarity": similarity,
+            "spoken_text": clean_text,
+            "worker_footprint_gb": worker_resp.get("footprint_gb"),
         })
         return audio_np, sr, metrics
 
     def _synthesize_locked(
         self, model_id, text, instruct, language, speed, trim_silence, temperature, top_p,
         repetition_penalty, seed, ref_audio_path, ref_text, prev_audio_path, prev_text,
-        dynamic_temperature, blend_audio_path, blend_text, blend_strength,
+        dynamic_temperature, blend_audio_path, blend_text, blend_strength, chatterbox_opts=None,
     ) -> Tuple[np.ndarray, int, Dict[str, Any]]:
         info = MODEL_REGISTRY[model_id]
         t0 = time.perf_counter()
@@ -1331,7 +1403,7 @@ class VoiceForgeEngine:
         if info["family"] == "chatterbox":
             return self._synthesize_chatterbox(
                 text, clean_text, extracted_tags, ref_audio_path, speed, trim_silence, temperature, top_p,
-                repetition_penalty, effective_seed, dynamic_temperature, t0,
+                repetition_penalty, effective_seed, dynamic_temperature, t0, chatterbox_opts or {},
             )
 
         # Optional emotion blend: a second clip of the same person joined onto the golden reference

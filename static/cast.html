@@ -132,10 +132,11 @@
           <div>
             <label class="field" style="margin-top: 0;">Voice engine</label>
             <select id="cloneEngine" onchange="saveDraft()">
+              <option value="">Each profile's setting</option>
               <option value="qwen3_clone">Qwen3 Clone</option>
               <option value="chatterbox">Chatterbox</option>
             </select>
-            <div class="dim">Which engine speaks the cast voices. Chatterbox has a stronger emotion dial; Qwen3 keeps the closest timbre.</div>
+            <div class="dim">Which engine speaks the cast voices. "Each profile's setting" uses the engine chosen in Clone Studio (Qwen3 Clone for other voices). Chatterbox has a stronger emotion dial; Qwen3 keeps the closest timbre.</div>
           </div>
           <div>
             <label class="field" style="margin-top: 0;">Takes per line</label>
@@ -818,7 +819,7 @@
         context_continuity: $('continuity').checked,
         natural_pacing: $('naturalPacing').checked,
         takes_per_line: parseInt($('takesPerLine').value, 10),
-        clone_model_id: $('cloneEngine').value,
+        clone_model_id: $('cloneEngine').value || null,
       };
     }
     async function renderScene() {

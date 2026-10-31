@@ -119,10 +119,10 @@
 
     function fillEngines(models) {
       const sel = $('cloneEngine');
-      const keep = sel.value || localStorage.getItem('vf.scenes.clone') || 'qwen3_clone';
+      const keep = sel.value || localStorage.getItem('vf.scenes.clone') || '';
       const clones = models.filter((m) => m.mode === 'voice_clone');
-      sel.innerHTML = clones.map((m) => `<option value="${m.id}" ${m.available === false ? 'disabled' : ''}>${esc(VF.shortName(m.id))}${m.available === false ? ' (not installed)' : ''}</option>`).join('');
-      sel.value = clones.some((m) => m.id === keep && m.available !== false) ? keep : 'qwen3_clone';
+      sel.innerHTML = `<option value="">Each profile's setting</option>` + clones.map((m) => `<option value="${m.id}" ${m.available === false ? 'disabled' : ''}>${esc(VF.shortName(m.id))}${m.available === false ? ' (not installed)' : ''}</option>`).join('');
+      sel.value = clones.some((m) => m.id === keep && m.available !== false) ? keep : '';
     }
 
     async function renderScene() {
@@ -145,7 +145,7 @@
             context_continuity: $('continuity').checked,
             natural_pacing: $('naturalPacing').checked,
             takes_per_line: parseInt($('takesPerLine').value, 10),
-            clone_model_id: $('cloneEngine').value,
+            clone_model_id: $('cloneEngine').value || null,
             auto_lock_new_characters: true,
           }),
         });
