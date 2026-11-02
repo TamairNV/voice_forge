@@ -159,7 +159,7 @@ class LoadModelRequest(BaseModel):
 class SynthesizeRequest(BaseModel):
     model_id: str = Field(
         "qwen3_voicedesign",
-        description="Engine ID: 'qwen3_voicedesign' (describe voice), 'maya1' (describe voice + inline <laugh>/<sigh> tags), or 'qwen3_clone' (use locked character_id).",
+        description="Engine ID: 'qwen3_voicedesign' (describe voice), 'maya1' (describe voice + inline <laugh>/<sigh> tags), 'qwen3_clone' or 'chatterbox' (use locked character_id).",
     )
     text: str = Field(
         ...,

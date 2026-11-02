@@ -165,7 +165,8 @@ def analyze_voice_acoustics(
             frame_energies.append(float(np.sqrt(np.mean(f ** 2))))
             frames_list.append(f)
 
-        energy_thresh = max(0.015, float(np.percentile(frame_energies, 35)))
+        # Relative to the loudest frame so quiet clone references/takes still get a pitch reading
+        energy_thresh = max(1e-4, 0.075 * max(frame_energies), float(np.percentile(frame_energies, 35)))
         for f, e in zip(frames_list, frame_energies):
             if e < energy_thresh:
                 continue
